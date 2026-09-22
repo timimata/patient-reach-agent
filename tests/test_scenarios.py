@@ -10,7 +10,7 @@ from datetime import time
 from reach_agent import messages
 from reach_agent.extraction import ExtractionError
 from reach_agent.models import Channel, OutboundKind, Phase
-from tests.helpers import accept, mon, needs_human, scheduling, thu, tue, wed
+from tests.helpers import accept, mon, needs_human, scheduling, thu, tue, unclear, wed
 
 ENQUIRY = "Olá, queria marcar uma consulta"
 AFTER_SIX = "Estou a trabalhar. Podem ligar depois das 18h?"
@@ -42,6 +42,49 @@ def test_clear_request_is_booked_after_missed_call_and_callback(simulate):
     assert sim.conv.booked_slot == tue(18, 30)
     assert "amanhã às 18:30" in booked.text
     assert tue(18, 30) not in sim.agent.calendar.free_slots(after=mon(0), limit=100)
+
+
+# -- 2. ambiguous time preference --------------------------------------------------------
+
+def test_ambiguous_preference_asks_for_clarification_then_continues(simulate):
+    sim = simulate({ENQUIRY: scheduling(), "Liguem mais logo": scheduling(),
+                    "Às 17h": scheduling(earliest="17:00", latest="17:00")})
+    sim.enquiry(ENQUIRY)
+    sim.call(answered=False)
+
+    [question] = sim.patient("Liguem mais logo")
+    assert "A que horas prefere" in question.text
+    assert sim.conv.phase is Phase.AWAITING_REPLY and sim.conv.next_call_at is None  # no guessing
+
+    confirmation, callback = sim.patient("Às 17h")
+    assert callback.at == mon(17)
+    # it continued the same conversation instead of starting over
+    assert sim.conv.clarifications == 1
+    assert sum("Tentámos ligar-lhe" in turn.text for turn in sim.conv.transcript) == 1
+
+
+def test_repeated_confusion_is_handed_off_after_two_questions(simulate):
+    sim = simulate({ENQUIRY: scheduling(), "hmm": unclear(), "não sei": unclear(), "talvez": unclear()})
+    sim.enquiry(ENQUIRY)
+    sim.call(answered=False)
+    sim.patient("hmm")
+    sim.patient("não sei")
+    assert sim.conv.phase is Phase.AWAITING_REPLY
+
+    [reply] = sim.patient("talvez")
+    assert sim.conv.phase is Phase.HANDED_OFF
+    assert (sim.conv.handoff.reason, sim.conv.handoff.trigger) == ("patient_not_understood", "talvez")
+    assert reply.text == messages.HANDOFF
+
+
+def test_unclear_slot_choice_asks_which_option(simulate):
+    sim = simulate({ENQUIRY: scheduling(), "Sim": accept(), "A segunda": accept(option=2)})
+    sim.enquiry(ENQUIRY)
+    sim.call(answered=True)
+    [question] = sim.patient("Sim")  # yes... to which of the three?
+    assert "qual destas opções" in question.text and sim.conv.phase is Phase.OFFERING_SLOTS
+    sim.patient("A segunda")
+    assert sim.conv.booked_slot == sim.conv.offered_slots[1]
 
 
 # -- 4. something that needs human judgement --------------------------------------------

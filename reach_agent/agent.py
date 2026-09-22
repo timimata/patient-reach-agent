@@ -17,8 +17,9 @@ from .extraction import ExtractionContext, ExtractionError, Extractor, extractio
 from .guardrails import ContactWindow, plan_contact
 from .models import Channel, Conversation, Extraction, Handoff, Intent, Outbound, OutboundKind, Phase
 
-OFFER_SIZE = 3     # slots offered at once
-HISTORY_TURNS = 6  # recent turns the extractor gets as context
+MAX_CLARIFICATIONS = 2  # "sorry, I didn't get that" questions per conversation
+OFFER_SIZE = 3          # slots offered at once
+HISTORY_TURNS = 6       # recent turns the extractor gets as context
 
 
 class ReachAgent:
@@ -73,7 +74,9 @@ class ReachAgent:
             plan = plan_contact(extraction.preference, now, self.window)
             if plan.honours_preference:
                 return self._confirm_call(conv, plan.at, now)
-        raise NotImplementedError(f"not handled yet: {extraction}")
+            raise NotImplementedError("preference outside contact hours")
+        # vague ("mais logo"), off-topic or a bare "sim" with nothing to agree to
+        return self._clarify(conv, messages.ask_call_time(self.window), now)
 
     def _on_slot_answer(self, conv: Conversation, extraction: Extraction, now: datetime) -> list[Outbound]:
         """OFFERING_SLOTS: the patient is choosing one of conv.offered_slots."""
@@ -81,7 +84,7 @@ class ReachAgent:
             option = extraction.option or (1 if len(conv.offered_slots) == 1 else None)
             if option is not None and 1 <= option <= len(conv.offered_slots):
                 return self._book(conv, conv.offered_slots[option - 1], now)
-        raise NotImplementedError(f"not handled yet: {extraction}")
+        return self._clarify(conv, messages.ask_which_slot(conv.offered_slots, now), now)
 
     # -- actions --------------------------------------------------------------------------
 
@@ -121,6 +124,14 @@ class ReachAgent:
         conv.booked_slot = slot
         conv.log(now, "booked", slot=slot)
         return [self._reply(conv, messages.booked(slot, now), now)]
+
+    def _clarify(self, conv: Conversation, question: str, now: datetime) -> list[Outbound]:
+        """Ask again, a bounded number of times: repeated confusion is a job for a human."""
+        if conv.clarifications >= MAX_CLARIFICATIONS:
+            return self._hand_off(conv, "patient_not_understood", now, trigger=conv.transcript[-1].text)
+        conv.clarifications += 1
+        conv.log(now, "clarification", count=conv.clarifications)
+        return [self._reply(conv, question, now)]
 
     def _hand_off(
         self, conv: Conversation, reason: str | None, now: datetime, *,
