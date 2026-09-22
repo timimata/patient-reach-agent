@@ -10,7 +10,7 @@ from datetime import time
 from reach_agent import messages
 from reach_agent.extraction import ExtractionError
 from reach_agent.models import Channel, OutboundKind, Phase
-from tests.helpers import accept, mon, needs_human, scheduling, thu, tue, unclear, wed
+from tests.helpers import accept, fri, mon, needs_human, scheduling, thu, tue, unclear, wed
 
 ENQUIRY = "Olá, queria marcar uma consulta"
 AFTER_SIX = "Estou a trabalhar. Podem ligar depois das 18h?"
@@ -202,3 +202,67 @@ def test_any_reply_resets_the_unanswered_count(simulate):
     sim.call(answered=False)  # missed the agreed callback too
     assert sim.conv.unanswered == 1  # consecutive, not total: the patient did answer in between
     assert sim.conv.phase is Phase.AWAITING_REPLY
+
+
+# -- conversation memory: adapt and continue, never start over ------------------------------
+
+def test_extractor_reads_each_message_with_the_conversation_as_context(simulate):
+    sim = simulate({ENQUIRY: scheduling(), AFTER_SIX: scheduling(earliest="18:00"),
+                    "A de quarta": accept(option=2)})
+    sim.enquiry(ENQUIRY)
+    sim.call(answered=False)
+    sim.patient(AFTER_SIX, at=mon(14, 40))
+    sim.call(answered=True)
+    sim.patient("A de quarta")
+
+    message, context = sim.agent.extractor.calls[-1]
+    assert message == "A de quarta"
+    assert context.phase is Phase.OFFERING_SLOTS
+    assert context.offered_slots == (tue(18, 30), wed(19), thu(18))  # what "quarta" refers to
+    assert AFTER_SIX in [turn.text for turn in context.history]
+    assert sim.conv.booked_slot == wed(19)
+
+
+def test_pending_callback_can_be_rescheduled(simulate):
+    sim = simulate({ENQUIRY: scheduling(), AFTER_SIX: scheduling(earliest="18:00"),
+                    "Afinal só consigo às 19h": scheduling(earliest="19:00", latest="19:00")})
+    sim.enquiry(ENQUIRY)
+    sim.call(answered=False)
+    sim.patient(AFTER_SIX, at=mon(14, 40))
+    assert sim.conv.next_call_at == mon(18)
+
+    confirmation, callback = sim.patient("Afinal só consigo às 19h", at=mon(16))
+    assert sim.conv.next_call_at == callback.at == mon(19)
+
+
+def test_new_preference_during_the_call_reoffers_matching_slots(simulate):
+    sim = simulate({ENQUIRY: scheduling(), "Nenhuma dá. Tem na sexta?": scheduling(day=fri(0).date()),
+                    "A segunda": accept(option=2)})
+    sim.enquiry(ENQUIRY)
+    sim.call(answered=True)
+    sim.patient("Nenhuma dá. Tem na sexta?")
+    assert sim.conv.offered_slots == [fri(12), fri(19, 30)]
+    sim.patient("A segunda")  # "the second" of the *new* offer
+    assert sim.conv.booked_slot == fri(19, 30)
+
+
+def test_slot_taken_meanwhile_is_reoffered_not_double_booked(simulate):
+    sim = simulate({ENQUIRY: scheduling(), "A primeira": accept(option=1)})
+    sim.enquiry(ENQUIRY)
+    sim.call(answered=True)
+    first = sim.conv.offered_slots[0]
+    sim.agent.calendar.book(first)  # another patient, on another line, was faster
+
+    [reoffer] = sim.patient("A primeira")
+    assert sim.conv.phase is Phase.OFFERING_SLOTS
+    assert first not in sim.conv.offered_slots
+    assert reoffer.text.startswith(messages.SLOT_TAKEN)
+
+
+def test_no_free_slots_hands_off(simulate):
+    sim = simulate({ENQUIRY: scheduling()})
+    for slot in sim.agent.calendar.free_slots(after=mon(0), limit=100):
+        sim.agent.calendar.book(slot)
+    sim.enquiry(ENQUIRY)
+    sim.call(answered=True)
+    assert sim.conv.handoff.reason == "no_availability"

@@ -12,7 +12,7 @@ from datetime import datetime
 from time import perf_counter
 
 from . import messages
-from .clinic_calendar import Calendar
+from .clinic_calendar import Calendar, SlotUnavailable
 from .extraction import ExtractionContext, ExtractionError, Extractor, extraction_to_dict
 from .guardrails import ContactWindow, plan_contact
 from .models import Channel, Conversation, Extraction, Handoff, Intent, Outbound, OutboundKind, Phase
@@ -98,6 +98,9 @@ class ReachAgent:
             option = extraction.option or (1 if len(conv.offered_slots) == 1 else None)
             if option is not None and 1 <= option <= len(conv.offered_slots):
                 return self._book(conv, conv.offered_slots[option - 1], now)
+        elif extraction.intent is Intent.SCHEDULING and extraction.preference.is_specific:
+            conv.preference = extraction.preference  # "tem na sexta?": adapt the offer, keep going
+            return self._offer_slots(conv, now)
         return self._clarify(conv, messages.ask_which_slot(conv.offered_slots, now), now)
 
     # -- actions --------------------------------------------------------------------------
@@ -131,6 +134,8 @@ class ReachAgent:
         # The remembered preference ("depois das 18h") also hints which slots will suit.
         preferred = self.calendar.free_slots(after=now, preference=conv.preference, limit=OFFER_SIZE)
         slots = preferred or self.calendar.free_slots(after=now, limit=OFFER_SIZE)
+        if not slots:
+            return self._hand_off(conv, "no_availability", now)
         conv.phase = Phase.OFFERING_SLOTS
         conv.offered_slots = slots
         conv.log(now, "slots_offered", slots=slots, matched_preference=bool(preferred))
@@ -138,7 +143,11 @@ class ReachAgent:
         return [self._reply(conv, text, now)]
 
     def _book(self, conv: Conversation, slot: datetime, now: datetime) -> list[Outbound]:
-        self.calendar.book(slot)
+        try:
+            self.calendar.book(slot)
+        except SlotUnavailable:  # taken since we offered it: say so and offer again
+            conv.log(now, "slot_taken", slot=slot)
+            return self._offer_slots(conv, now, opening=messages.SLOT_TAKEN)
         conv.phase = Phase.BOOKED
         conv.booked_slot = slot
         conv.log(now, "booked", slot=slot)
