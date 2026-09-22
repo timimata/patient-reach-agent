@@ -174,3 +174,31 @@ def test_extraction_failure_hands_off_instead_of_guessing(simulate):
     sim.patient(AFTER_SIX)
     assert sim.conv.phase is Phase.HANDED_OFF
     assert sim.conv.handoff.reason == "extraction_failed"
+
+
+# -- 5. no response / timeout ---------------------------------------------------------------
+
+def test_no_response_follows_up_within_hours_then_stops_for_human_review(simulate):
+    sim = simulate({ENQUIRY: scheduling()}, start=mon(19, 30))
+    sim.enquiry(ENQUIRY)
+
+    [follow_up] = sim.call(answered=False)  # attempt 1 at 19:30
+    assert follow_up.at == mon(19, 30)
+
+    [reminder] = sim.no_reply()             # attempt 2 times out at 23:30...
+    assert reminder.at == tue(9)            # ...but the reminder waits for the window
+
+    assert sim.no_reply() == []             # attempt 3: stop contacting
+    assert sim.conv.phase is Phase.HANDED_OFF
+    assert sim.conv.handoff.reason == "contact_attempts_exhausted"
+    assert [out.channel for out in sim.outbox] == [Channel.VOICE, Channel.WHATSAPP, Channel.WHATSAPP]
+
+
+def test_any_reply_resets_the_unanswered_count(simulate):
+    sim = simulate({ENQUIRY: scheduling(), AFTER_SIX: scheduling(earliest="18:00")})
+    sim.enquiry(ENQUIRY)
+    sim.call(answered=False)
+    sim.patient(AFTER_SIX, at=mon(14, 40))
+    sim.call(answered=False)  # missed the agreed callback too
+    assert sim.conv.unanswered == 1  # consecutive, not total: the patient did answer in between
+    assert sim.conv.phase is Phase.AWAITING_REPLY

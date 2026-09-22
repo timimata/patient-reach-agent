@@ -17,6 +17,7 @@ from .extraction import ExtractionContext, ExtractionError, Extractor, extractio
 from .guardrails import ContactWindow, plan_contact
 from .models import Channel, Conversation, Extraction, Handoff, Intent, Outbound, OutboundKind, Phase
 
+MAX_UNANSWERED = 3      # consecutive unanswered contacts before a human reviews the enquiry
 MAX_CLARIFICATIONS = 2  # "sorry, I didn't get that" questions per conversation
 OFFER_SIZE = 3          # slots offered at once
 HISTORY_TURNS = 6       # recent turns the extractor gets as context
@@ -50,14 +51,21 @@ class ReachAgent:
             conv.say(now, "system", Channel.VOICE, "[chamada não atendida]")
             return self._no_answer(conv, now, messages.missed_call(conv.patient_name))
         conv.say(now, "system", Channel.VOICE, "[chamada atendida]")
+        conv.unanswered = 0
         conv.channel = Channel.VOICE
         return self._offer_slots(conv, now, opening=messages.greeting(conv.patient_name))
+
+    def on_no_reply(self, conv: Conversation, now: datetime) -> list[Outbound]:
+        """We messaged the patient and the time we give them to answer has passed."""
+        self._expect(conv, Phase.AWAITING_REPLY)
+        return self._no_answer(conv, now, messages.reminder(conv.patient_name))
 
     def on_patient_message(self, conv: Conversation, text: str, now: datetime) -> list[Outbound]:
         conv.say(now, "patient", conv.channel, text)
         if conv.phase.is_terminal:
             conv.log(now, "message_after_close", phase=conv.phase.value)  # not ours to answer any more
             return []
+        conv.unanswered = 0
         extraction = self._read(conv, text, now)
         if extraction.intent is Intent.NEEDS_HUMAN:
             return self._hand_off(conv, extraction.handoff_reason, now, trigger=text)
@@ -107,7 +115,12 @@ class ReachAgent:
         return Outbound(OutboundKind.OUTREACH, Channel.VOICE, at, f"Chamada para {conv.patient_name}")
 
     def _no_answer(self, conv: Conversation, now: datetime, follow_up: str) -> list[Outbound]:
-        """A contact attempt went unanswered: follow up on the other channel."""
+        """A contact attempt went unanswered: follow up in writing, or stop for human review."""
+        conv.unanswered += 1
+        conv.log(now, "no_answer", consecutive=conv.unanswered)
+        if conv.unanswered >= MAX_UNANSWERED:
+            # One missed call never closes an enquiry, but we don't chase patients forever.
+            return self._hand_off(conv, "contact_attempts_exhausted", now, notify_patient=False)
         conv.phase = Phase.AWAITING_REPLY
         conv.channel = Channel.WHATSAPP
         at = self._within_contact_hours(conv, now)

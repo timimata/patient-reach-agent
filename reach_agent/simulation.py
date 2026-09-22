@@ -10,9 +10,10 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from .agent import ReachAgent
-from .models import Conversation, Outbound, Phase
+from .models import Channel, Conversation, Outbound, Phase
 
 TYPING_DELAY = timedelta(minutes=5)  # default gap before the patient's next message
+REPLY_TIMEOUT = timedelta(hours=4)   # how long a WhatsApp message waits for an answer
 
 
 @dataclass
@@ -48,6 +49,12 @@ class Simulation:
     def patient(self, text: str, at: datetime | None = None) -> list[Outbound]:
         self.now = at or self.now + TYPING_DELAY
         return self._run(f"patient: {text}", self.agent.on_patient_message, text)
+
+    def no_reply(self) -> list[Outbound]:
+        """The patient ignores our last message: the clock jumps past the reply timeout."""
+        last_message = max(out.at for out in self.outbox if out.channel is Channel.WHATSAPP)
+        self.now = max(self.now, last_message) + REPLY_TIMEOUT
+        return self._run("no reply", self.agent.on_no_reply)
 
     def _run(self, event, handler, *args) -> list[Outbound]:
         phase_before = self.conv.phase
