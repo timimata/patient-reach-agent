@@ -87,6 +87,44 @@ def test_unclear_slot_choice_asks_which_option(simulate):
     assert sim.conv.booked_slot == sim.conv.offered_slots[1]
 
 
+# -- 3. preference outside the allowed contact hours --------------------------------------
+
+AFTER_NINE_PM = "Só estou livre depois das 21h"
+
+
+def test_out_of_hours_preference_is_not_used_and_nearest_valid_time_is_proposed(simulate):
+    sim = simulate({ENQUIRY: scheduling(), AFTER_NINE_PM: scheduling(earliest="21:00"),
+                    "Sim, pode ser": accept()})
+    sim.enquiry(ENQUIRY)
+    sim.call(answered=False)
+
+    [proposal] = sim.patient(AFTER_NINE_PM, at=mon(14, 40))
+    assert sim.conv.next_call_at is None  # nothing scheduled at 21h, nor anywhere else yet
+    assert sim.conv.proposed_call_at == tue(9)
+    assert "entre as 09:00 e as 20:00" in proposal.text and "amanhã às 09:00" in proposal.text
+
+    # "sim" only means something because the agent remembers what it proposed
+    confirmation, callback = sim.patient("Sim, pode ser")
+    assert callback.at == tue(9)
+    assert sim.conv.proposed_call_at is None
+
+
+def test_patient_can_counter_propose_a_valid_time(simulate):
+    sim = simulate({ENQUIRY: scheduling(), AFTER_NINE_PM: scheduling(earliest="21:00"),
+                    "Então às 19h30": scheduling(earliest="19:30", latest="19:30")})
+    sim.enquiry(ENQUIRY)
+    sim.call(answered=False)
+    sim.patient(AFTER_NINE_PM, at=mon(14, 40))
+    confirmation, callback = sim.patient("Então às 19h30")
+    assert callback.at == mon(19, 30)
+
+
+def test_enquiry_arriving_at_night_is_first_called_next_morning(simulate):
+    sim = simulate({ENQUIRY: scheduling()}, start=mon(22, 30))
+    [call] = sim.enquiry(ENQUIRY)
+    assert (call.channel, call.at) == (Channel.VOICE, tue(9))
+
+
 # -- 4. something that needs human judgement --------------------------------------------
 
 CLINICAL = "Antes de marcar: tenho a gengiva a sangrar desde ontem, é normal?"

@@ -69,12 +69,18 @@ class ReachAgent:
 
     def _on_call_time_answer(self, conv: Conversation, extraction: Extraction, now: datetime) -> list[Outbound]:
         """AWAITING_REPLY or CALLING: the patient is telling us when to call."""
+        if extraction.intent is Intent.ACCEPT and conv.proposed_call_at is not None:
+            return self._confirm_call(conv, conv.proposed_call_at, now)  # "sim" to what we proposed
         if extraction.intent is Intent.SCHEDULING and extraction.preference.is_specific:
             conv.preference = extraction.preference
             plan = plan_contact(extraction.preference, now, self.window)
             if plan.honours_preference:
                 return self._confirm_call(conv, plan.at, now)
-            raise NotImplementedError("preference outside contact hours")
+            # Outside contact hours: don't call then, and don't silently pick another time either.
+            conv.proposed_call_at = plan.at
+            conv.log(now, "guardrail_blocked_preference", preference=extraction_to_dict(extraction),
+                     proposed=plan.at)
+            return [self._reply(conv, messages.propose_call(plan.at, self.window, now), now)]
         # vague ("mais logo"), off-topic or a bare "sim" with nothing to agree to
         return self._clarify(conv, messages.ask_call_time(self.window), now)
 
