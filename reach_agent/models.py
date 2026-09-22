@@ -111,5 +111,5 @@ class Conversation:
     def say(self, at: datetime, speaker: str, channel: Channel, text: str) -> None:
         self.transcript.append(Turn(at, speaker, channel, text))
 
-    def log(self, at: datetime, event: str, **data) -> None:
-        self.events.append({"at": at, "event": event, **data})
+    def log(self, moment: datetime, event: str, **data) -> None:
+        self.events.append({"time": moment, "event": event, **data})
