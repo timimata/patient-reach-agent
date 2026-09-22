@@ -13,9 +13,9 @@ from time import perf_counter
 
 from . import messages
 from .clinic_calendar import Calendar
-from .extraction import ExtractionContext, Extractor, extraction_to_dict
+from .extraction import ExtractionContext, ExtractionError, Extractor, extraction_to_dict
 from .guardrails import ContactWindow, plan_contact
-from .models import Channel, Conversation, Extraction, Intent, Outbound, OutboundKind, Phase
+from .models import Channel, Conversation, Extraction, Handoff, Intent, Outbound, OutboundKind, Phase
 
 OFFER_SIZE = 3     # slots offered at once
 HISTORY_TURNS = 6  # recent turns the extractor gets as context
@@ -34,6 +34,8 @@ class ReachAgent:
         conv = Conversation(patient_name=patient_name)
         conv.say(now, "patient", conv.channel, enquiry)
         extraction = self._read(conv, enquiry, now)
+        if extraction.intent is Intent.NEEDS_HUMAN:
+            return conv, self._hand_off(conv, extraction.handoff_reason, now, trigger=enquiry)
         if extraction.intent is Intent.SCHEDULING:
             conv.preference = extraction.preference
         plan = plan_contact(conv.preference, now, self.window)
@@ -52,7 +54,12 @@ class ReachAgent:
 
     def on_patient_message(self, conv: Conversation, text: str, now: datetime) -> list[Outbound]:
         conv.say(now, "patient", conv.channel, text)
+        if conv.phase.is_terminal:
+            conv.log(now, "message_after_close", phase=conv.phase.value)  # not ours to answer any more
+            return []
         extraction = self._read(conv, text, now)
+        if extraction.intent is Intent.NEEDS_HUMAN:
+            return self._hand_off(conv, extraction.handoff_reason, now, trigger=text)
         if conv.phase is Phase.OFFERING_SLOTS:
             return self._on_slot_answer(conv, extraction, now)
         return self._on_call_time_answer(conv, extraction, now)
@@ -115,10 +122,22 @@ class ReachAgent:
         conv.log(now, "booked", slot=slot)
         return [self._reply(conv, messages.booked(slot, now), now)]
 
+    def _hand_off(
+        self, conv: Conversation, reason: str | None, now: datetime, *,
+        trigger: str | None = None, notify_patient: bool = True,
+    ) -> list[Outbound]:
+        """Stop, record why and everything said so far, and let a human take over."""
+        reason = reason or "needs_human"
+        conv.handoff = Handoff(reason, now, trigger, conv.phase, conv.preference, tuple(conv.transcript))
+        conv.phase = Phase.HANDED_OFF
+        conv.next_call_at = None  # cancel any pending callback: the human decides now
+        conv.log(now, "handoff", reason=reason)
+        return [self._reply(conv, messages.HANDOFF, now)] if notify_patient else []
+
     # -- plumbing -------------------------------------------------------------------------
 
     def _read(self, conv: Conversation, text: str, now: datetime) -> Extraction:
-        """Ask the extractor what the message means, with the conversation as context."""
+        """Ask the extractor what the message means. If it can't tell us, a human reads it."""
         context = ExtractionContext(
             now=now,
             phase=conv.phase,
@@ -127,7 +146,11 @@ class ReachAgent:
             history=tuple(conv.transcript[-HISTORY_TURNS - 1:-1]),  # excludes `text` itself
         )
         started = perf_counter()
-        extraction = self.extractor.extract(text, context)
+        try:
+            extraction = self.extractor.extract(text, context)
+        except ExtractionError as exc:
+            conv.log(now, "extraction_failed", extractor=self.extractor.name, error=str(exc))
+            return Extraction(Intent.NEEDS_HUMAN, handoff_reason="extraction_failed")
         conv.log(now, "extraction", extractor=self.extractor.name, message=text,
                  result=extraction_to_dict(extraction), ms=round((perf_counter() - started) * 1000, 1))
         return extraction
