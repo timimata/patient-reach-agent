@@ -1,0 +1,6 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = [
+    "llm: calls the real OpenAI API; opt-in with --llm (costs credits)",
+]
