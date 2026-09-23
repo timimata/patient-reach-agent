@@ -1,2 +1,7 @@
 pytest>=8
-openai>=1.40  # OpenAI-compatible client; only needed for a real LLM (OpenAI or DeepSeek)
+httpx>=0.27              # FastAPI's test client (tests only)
+openai>=1.40             # OpenAI-compatible client; only needed for a real LLM (OpenAI or DeepSeek)
+fastapi>=0.110           # live WhatsApp demo: webhook server
+python-multipart>=0.0.9  # lets FastAPI read the form posts Twilio sends
+uvicorn>=0.29            # runs the webhook server
+twilio>=9                # signature check and sending WhatsApp messages
