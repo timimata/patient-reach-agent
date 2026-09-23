@@ -2,7 +2,7 @@
 
 import pytest
 
-from evals.run_eval import Result, evaluate, load_cases, summarize
+from evals.run_eval import DATASETS, Result, evaluate, load_cases, summarize
 from reach_agent.extraction import ExtractionError, ScriptedExtractor
 from reach_agent.models import Extraction, Intent, TimePreference
 from tests.helpers import tue
@@ -10,8 +10,9 @@ from tests.helpers import tue
 CATEGORIES = {"scheduling", "ambiguous", "out_of_hours", "accept", "needs_human", "unclear"}
 
 
-def test_dataset_is_well_formed():
-    cases = load_cases()
+@pytest.mark.parametrize("dataset", DATASETS)
+def test_dataset_is_well_formed(dataset):
+    cases = load_cases(DATASETS[dataset])
     assert len({case.id for case in cases}) == len(cases)
     assert len({case.message for case in cases}) == len(cases)
     assert {case.category for case in cases} == CATEGORIES
@@ -22,6 +23,11 @@ def test_dataset_is_well_formed():
             assert not case.expected.preference.is_specific, case.id
         if case.expected.option is not None:
             assert case.context.offered_slots, case.id
+
+
+def test_holdout_shares_no_message_with_dev():
+    dev = {case.message for case in load_cases(DATASETS["dev"])}
+    assert dev.isdisjoint(case.message for case in load_cases(DATASETS["holdout"]))
 
 
 def test_a_perfect_extractor_scores_perfectly():

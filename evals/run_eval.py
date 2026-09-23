@@ -3,6 +3,12 @@
     python -m evals.run_eval                 # rule-based baseline only (free, offline)
     python -m evals.run_eval rules deepseek  # side by side; needs DEEPSEEK_API_KEY
                                              # (providers: see reach_agent/llm.py)
+    python -m evals.run_eval rules deepseek --dataset holdout
+
+Two datasets. dataset.jsonl ("dev") is the one the prompt and the rules were tuned on, so
+scores there are optimistic. holdout.jsonl was written and committed after that tuning,
+before its first run, and must never be used to change the prompt or the rules: it is
+the honest estimate.
 
 Metrics, in the order they matter for this product:
   handoff recall   every message that needs a human gets one (safety: must be 100%)
@@ -25,7 +31,10 @@ from reach_agent.extraction import (ExtractionContext, ExtractionError, Extracto
                                     extraction_to_dict, parse_extraction)
 from reach_agent.models import Extraction, Intent, Phase
 
-DATASET = Path(__file__).with_name("dataset.jsonl")
+DATASETS = {
+    "dev": Path(__file__).with_name("dataset.jsonl"),
+    "holdout": Path(__file__).with_name("holdout.jsonl"),
+}
 NOW = datetime(2026, 9, 21, 14, 14)  # every case is read as if it arrived at this moment (a Monday)
 # The fields agent.py actually reads for each intent. Anything else the extractor fills in
 # (e.g. the time of the option the patient picked) changes nothing, so it is not an error.
@@ -80,7 +89,7 @@ class Summary:
     mean_ms: float
 
 
-def load_cases(path: Path = DATASET) -> list[Case]:
+def load_cases(path: Path = DATASETS["dev"]) -> list[Case]:
     cases = []
     for line in path.read_text(encoding="utf-8").splitlines():
         if not line.strip():
@@ -149,14 +158,16 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Compare extractors on the labelled dataset.")
     parser.add_argument("extractors", nargs="*", default=["rules"],
                         help="rules and/or LLM providers from reach_agent/llm.py")
-    names = parser.parse_args(argv).extractors
+    parser.add_argument("--dataset", choices=DATASETS, default="dev")
+    args = parser.parse_args(argv)
+    names = args.extractors
 
-    cases = load_cases()
+    cases = load_cases(DATASETS[args.dataset])
     extractors = {name: _make(name) for name in names}
     runs = {name: evaluate(extractor, cases) for name, extractor in extractors.items()}
     summaries = [summarize(results) for results in runs.values()]
 
-    print(f"{len(cases)} labelled cases, read as if received {NOW:%Y-%m-%d %H:%M}\n")
+    print(f"{args.dataset}: {len(cases)} labelled cases, read as if received {NOW:%Y-%m-%d %H:%M}\n")
     print(f"{'':18}" + "".join(f"{name:>12}" for name in names))
     for label, show in ROWS:
         print(f"{label:18}" + "".join(f"{show(summary):>12}" for summary in summaries))
