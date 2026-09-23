@@ -91,6 +91,7 @@ The flow follows the example Wilco shows on [getwilco.ai](https://getwilco.ai):
 | Invariants | rules that must hold in *any* conversation, checked automatically after every scenario: no contact outside hours, nothing after closing, counters within limits. A mutation test disables the guardrail and confirms the check fails | `tests/helpers.py::check_invariants`, `tests/test_invariants.py` |
 | Eval | how well each extractor **reads** messages: 35 development + 21 held-out messages, labelled with the conversation state they arrive in | `evals/` |
 | End-to-end | with `--llm`, the same scenarios run with the real model reading the messages (the last full run with DeepSeek passed 112/112) | `pytest --llm deepseek` |
+| WhatsApp adapter | Twilio signature check, retried messages handled once, the 24-hour window, routing each action to its channel, send failures. Offline, with locally signed requests and a fake sender | `tests/test_whatsapp.py` |
 
 The five required cases, in `tests/test_scenarios.py`:
 
@@ -180,6 +181,48 @@ pytest --llm deepseek             # smoke test + eval thresholds + every scenari
 The `openai` provider (with `OPENAI_API_KEY` and `--llm openai`) is implemented and tested against a
 fake client, but I have not run it against the real API.
 
+## Live on WhatsApp (optional)
+
+The same agent can talk to a real phone over WhatsApp, through Twilio's sandbox. Each channel has
+its own transport: WhatsApp messages go through Twilio to the phone, while the voice call stays
+simulated in the terminal, where you pick up and type what the patient says. `agent.py` did not
+change for this; the adapter only uses the `Outbound` / `Channel` seams that were already there.
+
+What the adapter (`reach_agent/whatsapp.py`) takes care of:
+
+- **Authenticity:** every webhook request must carry a valid Twilio signature (forged → 403).
+- **Retries:** Twilio resends a message if it gets no answer; each `MessageSid` is acted on once.
+- **Latency:** the webhook answers Twilio immediately; the agent and its LLM call run outside the
+  request, so a slow model never causes a timeout and a duplicate delivery.
+- **WhatsApp's 24-hour rule:** free-form messages are only allowed within 24 hours of the patient's
+  last WhatsApp message. Outside that window the adapter refuses to send and says a pre-approved
+  template would be needed.
+
+Setup (about 15 minutes):
+
+1. Create a free Twilio account. In the console, open *Messaging → Try it out → Send a WhatsApp
+   message*, and from your phone send the `join <code>` shown there to the sandbox number.
+2. Install [ngrok](https://ngrok.com/download), run `ngrok http 8000` and copy the
+   `https://….ngrok-free.app` address.
+3. In the sandbox settings, set *When a message comes in* to `https://….ngrok-free.app/whatsapp` (POST).
+4. In another terminal, from the project folder:
+
+```bash
+$env:TWILIO_ACCOUNT_SID = "AC..."
+$env:TWILIO_AUTH_TOKEN = "..."
+$env:TWILIO_WHATSAPP_FROM = "whatsapp:+14155238886"        # the sandbox number shown in the console
+$env:WHATSAPP_WEBHOOK_URL = "https://….ngrok-free.app/whatsapp"
+$env:DEEPSEEK_API_KEY = "sk-..."                           # optional: without --llm the rules are used
+python -m reach_agent.whatsapp_demo --llm deepseek
+```
+
+5. From your phone, send "Olá, queria marcar uma consulta" (*Hi, I'd like to book an appointment*)
+   and answer the simulated call in the terminal.
+
+Limits of the live demo: one patient at a time, state in memory, and the clock is still the
+simulated Monday (so "hoje às 18:00" is simulated time and scheduled messages go out immediately).
+The Twilio sandbox session expires 3 days after joining.
+
 ## Limitations and next steps
 
 - **The eval is small (56 messages) and I wrote all of it, held-out set included.** I wrote the
@@ -194,6 +237,10 @@ fake client, but I have not run it against the real API.
 - Rigid templates: generating the text with the LLM would make messages more natural, but would need
   its own evaluation (tone, no promise the code did not make).
 - State in memory and simulated timers; in production these would be a database and a scheduler.
+- **WhatsApp's 24-hour rule is only enforced in the live adapter.** In the terminal simulation the agent
+  sends a free-form WhatsApp message after a missed call even if the enquiry came from elsewhere
+  (e.g. a web form). Real WhatsApp would refuse that; the first message would have to be a
+  pre-approved template.
 - **A deferred reminder is not cancelled.** If the reply window expires at 23:30, the reminder is held
   until 09:00 (guardrail), but if the patient replies in the meantime (say at 07:30), the simulation
   still sends it. In production the scheduler would cancel the pending send when a reply arrives.
@@ -212,6 +259,8 @@ reach_agent/
   messages.py         everything the agent says to the patient
   simulation.py       simulated clock, shared by the demo and the tests
   cli.py              terminal demo
+  whatsapp.py         WhatsApp transport: Twilio webhook (signature, retries), sender, 24 h window
+  whatsapp_demo.py    live demo: patient on real WhatsApp, calls simulated in the terminal
 data/calendar.json    the week's slots
 evals/                dev and held-out sets + comparison script
 tests/                pytest
