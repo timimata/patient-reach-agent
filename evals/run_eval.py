@@ -7,7 +7,7 @@
 Metrics, in the order they matter for this product:
   handoff recall   every message that needs a human gets one (safety: must be 100%)
   invented times   vague answers must stay vague, not become a guessed time
-  intent accuracy  and exact match (intent + date + times + option)
+  intent accuracy  and exact match (intent + the fields the agent acts on for that intent)
   false handoffs   routine messages escalated for nothing (costs staff time, not safety)
 An extractor error counts as a handoff, because that is what the agent does with it.
 """
@@ -27,7 +27,14 @@ from reach_agent.models import Extraction, Intent, Phase
 
 DATASET = Path(__file__).with_name("dataset.jsonl")
 NOW = datetime(2026, 9, 21, 14, 14)  # every case is read as if it arrived at this moment (a Monday)
-COMPARED = ("intent", "date", "earliest", "latest", "option")
+# The fields agent.py actually reads for each intent. Anything else the extractor fills in
+# (e.g. the time of the option the patient picked) changes nothing, so it is not an error.
+ACTED_ON = {
+    Intent.SCHEDULING: ("date", "earliest", "latest"),
+    Intent.ACCEPT: ("option",),
+    Intent.NEEDS_HUMAN: (),
+    Intent.UNCLEAR: (),
+}
 
 
 @dataclass(frozen=True)
@@ -124,7 +131,7 @@ def summarize(results: list[Result]) -> Summary:
 
 def compared(extraction: Extraction) -> dict:
     data = extraction_to_dict(extraction)
-    return {field: data[field] for field in COMPARED}
+    return {"intent": data["intent"], **{field: data[field] for field in ACTED_ON[extraction.intent]}}
 
 
 ROWS = (

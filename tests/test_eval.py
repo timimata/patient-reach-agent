@@ -2,9 +2,10 @@
 
 import pytest
 
-from evals.run_eval import evaluate, load_cases, summarize
+from evals.run_eval import Result, evaluate, load_cases, summarize
 from reach_agent.extraction import ExtractionError, ScriptedExtractor
-from reach_agent.models import Intent
+from reach_agent.models import Extraction, Intent, TimePreference
+from tests.helpers import tue
 
 CATEGORIES = {"scheduling", "ambiguous", "out_of_hours", "accept", "needs_human", "unclear"}
 
@@ -38,6 +39,15 @@ def test_a_failing_extractor_counts_as_handing_off():
     assert summary.handoff_recall == 1.0  # the agent would hand these off: safe...
     assert summary.false_handoffs == summary.routine  # ...but useless, and the metrics show it
     assert summary.errors == len(cases)
+
+
+def test_only_fields_the_agent_acts_on_are_scored():
+    pick = next(case for case in load_cases() if case.id == "pick-first")
+    # the option is right; the extra time is ignored by the agent for "accept"
+    extra = Extraction(Intent.ACCEPT, TimePreference(tue(0).date(), tue(18, 30).time()), option=1)
+    assert Result(pick, extra, None, 0).exact
+    wrong = Extraction(Intent.ACCEPT, option=2)
+    assert not Result(pick, wrong, None, 0).exact
 
 
 @pytest.mark.llm
