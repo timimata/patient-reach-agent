@@ -47,9 +47,11 @@ O fluxo segue o exemplo que a Wilco mostra em [getwilco.ai](https://getwilco.ai)
 ## Decisões de desenho
 
 1. **O LLM só lê; o código decide.** O LLM converte texto livre numa `Extraction` (intenção, data,
-   horas, opção escolhida) com JSON schema estrito. *Quando* ligar, o que oferecer e quando parar é
-   código determinístico em `agent.py`. Assim a lógica testa-se sem LLM, e uma mensagem bem escrita
-   não consegue convencer o agente a violar uma regra.
+   horas, opção escolhida) em JSON, e esse JSON é sempre validado em código antes de ser usado.
+   *Quando* ligar, o que oferecer e quando parar é código determinístico em `agent.py`. Assim a lógica
+   testa-se sem LLM, e uma mensagem bem escrita não consegue convencer o agente a violar uma regra.
+   Como a validação vive no código, trocar de fornecedor é só configuração: a OpenAI garante o
+   schema no servidor, a DeepSeek só garante JSON válido, e o resto do sistema não muda.
 2. **O guardrail é código, num único ponto.** Todo o contacto iniciado pelo agente (chamadas,
    follow-ups, lembretes) passa por `_within_contact_hours()`. Uma preferência fora da janela
    ("só depois das 21h") nunca é usada: o agente explica e *propõe* a hora válida mais próxima que não
@@ -79,8 +81,8 @@ O fluxo segue o exemplo que a Wilco mostra em [getwilco.ai](https://getwilco.ai)
 | Unitários | guardrail, "hora válida mais próxima", calendário, validação do output do LLM, regras | `tests/test_guardrails.py`, `test_calendar.py`, `test_extraction.py`, `test_llm.py`, `test_rules.py` |
 | Cenários | as **decisões** do agente em conversas completas, com um extractor *scripted* (cada teste diz o que a mensagem significa) | `tests/test_scenarios.py` |
 | Invariantes | regras que têm de valer em *qualquer* conversa, verificadas automaticamente no fim de cada cenário: nenhum contacto fora de horas, nada depois de fechar, contadores dentro dos limites. Um teste de mutação desliga o guardrail e confirma que a verificação falha | `tests/helpers.py::check_invariants`, `tests/test_invariants.py` |
-| Eval | quão bem cada extractor **lê** mensagens: 35 mensagens rotuladas, com o estado da conversa em que chegam | `evals/` |
-| End-to-end | com `--llm`, os mesmos cenários correm com o modelo real a ler as mensagens | `pytest --llm` |
+| Eval | quão bem cada extractor **lê** mensagens: 35 mensagens de desenvolvimento + 21 *held-out*, rotuladas com o estado da conversa em que chegam | `evals/` |
+| End-to-end | com `--llm`, os mesmos cenários correm com o modelo real a ler as mensagens (com a DeepSeek passam os 112 testes) | `pytest --llm deepseek` |
 
 Os cinco casos obrigatórios, em `tests/test_scenarios.py`:
 
@@ -101,19 +103,40 @@ deu), depois exatidão e **handoffs desnecessários** (custam tempo à equipa, m
 O extractor de regras (regex) serve de baseline: o LLM tem de mostrar que é melhor por uma margem que
 justifique o custo e a latência.
 
-| | regras (baseline) | LLM |
-|---|---|---|
-| handoff recall | 100% | *correr `python -m evals.run_eval rules openai`* |
-| horas inventadas (5 casos vagos) | 1/5 | |
-| intenção correta | 86% | |
-| extração exata | 80% | |
-| handoffs desnecessários | 0/26 | |
+Há dois conjuntos. O **dev** (35 mensagens) foi usado para afinar o prompt e as regras. O
+**held-out** (21 mensagens novas) foi escrito e *commitado antes* de correr qualquer extractor nele
+(commit `004c092`) e nunca serviu para afinar nada. É a estimativa honesta.
 
-As falhas da baseline são as que se esperam de regex: "depois das **seis**" (hora por extenso),
-"**hoje** não dá" (lê "hoje" e ignora a negação, e é aí que inventa a hora) e "a de quarta"
-(só tem significado face às opções oferecidas).
-Cuidado: o dataset é pequeno e fui eu que o escrevi, e as regras foram escritas a olhar para ele,
-por isso os números da baseline são otimistas.
+| | regras | `deepseek` | `deepseek-thinking` |
+|---|---|---|---|
+| **dev**: handoff recall | 100% | 100% | 100% |
+| dev: horas inventadas | 1/5 | 0/5 | 0/5 |
+| dev: intenção correta | 86% | 100% | 97% |
+| **held-out**: handoff recall | **40%** | **100%** | 100% |
+| held-out: horas inventadas | 0/3 | 0/3 | 0/3 |
+| held-out: intenção correta | 52% | 95% | 100% |
+| latência média | 0 ms | ~0,9 s | ~1,4 s |
+
+Modelo `deepseek-flash`, com o raciocínio desligado e ligado. Cada configuração correu uma vez em
+cada conjunto. Houve 0 handoffs desnecessários em todos os casos.
+
+O que aprendi com isto:
+
+- **A regex parecia segura e não era.** Teve 100% de handoff recall no dev, onde foi escrita, e 40%
+  no held-out. Deixou passar "parti um dente, está a doer imenso" (conhecia "dor", mas não "doer"),
+  uma pergunta sobre anestesia durante a amamentação e uma reclamação, e leu "é a **segunda** vez"
+  como segunda-feira. Sem o held-out não o teria visto.
+- **A primeira corrida do LLM pareceu pior do que a regex** (71% contra 80% de extração exata). Mas 7
+  das 10 falhas eram o eval a penalizar campos que o agente nem lê: a hora da opção escolhida, ao lado
+  do número certo. Corrigi a métrica para comparar só o que o agente usa em cada intenção e voltei a
+  avaliar a baseline com a mesma regra (`9012ba8`).
+- As 3 falhas reais tinham uma causa comum: o modelo respondia `accept` quando não havia nada
+  proposto. Corrigi-as com uma regra geral no prompt, sem copiar as mensagens que falhavam
+  (`d25cd9c`). O dev passou de 91% para 100%, e depois o held-out deu 95%.
+- **O raciocínio não compensa aqui.** Custa +60% de latência sem melhorar nada: cada modo tem uma
+  falha, em conjuntos diferentes, e as duas levam à mesma pergunta de clarificação. Num agente de
+  voz, a latência é experiência do paciente, por isso fica desligado por defeito. Uma primeira sonda,
+  com um prompt vago, sugeria ~10 s por mensagem; medido no prompt real, são 1,4 s (`da5de63`).
 
 ## Como correr
 
@@ -132,21 +155,29 @@ python -m evals.run_eval          # eval da baseline
 Na demo: `/sem-resposta` simula o paciente não responder, `/estado` mostra a memória da conversa,
 `/trace` mostra os eventos instrumentados (cada extração com latência, decisões do guardrail, etc.).
 
-Com uma chave da OpenAI (gasta créditos; o modelo muda-se com `OPENAI_MODEL`, por defeito `gpt-4.1-mini`):
+Com um LLM real (gasta créditos). Funciona qualquer API compatível com a da OpenAI. Em
+`reach_agent/llm.py` estão configurados `deepseek` (`deepseek-flash`, sem raciocínio),
+`deepseek-thinking` e `openai` (`gpt-4.1-mini`); o modelo muda-se com `LLM_MODEL`.
 
 ```bash
-$env:OPENAI_API_KEY = "sk-..."    # PowerShell  (bash: export OPENAI_API_KEY=sk-...)
-python -m reach_agent --openai
-python -m evals.run_eval rules openai
-pytest --llm                      # smoke test + eval com limiares + cenários com o modelo real
+$env:DEEPSEEK_API_KEY = "sk-..."  # PowerShell  (bash: export DEEPSEEK_API_KEY=sk-...)
+python -m reach_agent --llm deepseek
+python -m evals.run_eval rules deepseek                    # conjunto dev
+python -m evals.run_eval rules deepseek --dataset holdout  # held-out
+pytest --llm deepseek             # smoke test + limiares do eval + todos os cenários com o modelo real
 ```
+
+O fornecedor `openai` (com `OPENAI_API_KEY` e `--llm openai`) está implementado e testado com um
+cliente falso, mas não o corri contra a API real.
 
 ## Limitações e próximos passos
 
-- **Dataset de eval pequeno e escrito por mim.** O passo seguinte seria mensagens reais anonimizadas
-  ou escritas por outra pessoa, com um conjunto separado que nunca uso para afinar o prompt nem as regras.
-- **Variância do LLM:** mesmo com `temperature=0` as respostas podem variar. Correria o eval várias vezes
-  e reportaria a variação, não um número só.
+- **O eval é pequeno (56 mensagens) e fui eu que escrevi tudo, held-out incluído.** Escrevi o
+  held-out depois de afinar o prompt, mas quem o escreveu é a mesma pessoa. O passo seguinte seriam
+  mensagens reais anonimizadas ou escritas por outra pessoa.
+- **Variância do LLM:** cada configuração correu uma vez (a exceção foi o dev com `deepseek`, que correu
+  duas vezes antes da mudança de prompt e deu o mesmo resultado). Correria N vezes e reportaria a variação.
+- Reporto a latência média; para voz importa mais a cauda (p95).
 - O eval é por mensagem; faltam métricas ao nível da conversa (taxa de marcação, nº de turnos).
 - Fusos horários, feriados e regras de contacto por país (o site da Wilco fala em *local rules* e
   *patient's timezone*).
@@ -162,14 +193,14 @@ reach_agent/
   guardrails.py       janela de contacto + hora válida mais próxima
   models.py           Conversation (estado/memória), Extraction, Outbound, Handoff
   extraction.py       interface Extractor + validação + extractor scripted para testes
-  llm.py              OpenAIExtractor (JSON schema estrito)
+  llm.py              LLMExtractor: DeepSeek ou OpenAI (qualquer API compatível)
   rules.py            extractor de regras (baseline offline)
   clinic_calendar.py  calendário falso
   messages.py         tudo o que o agente diz ao paciente
   simulation.py       relógio simulado, partilhado pela demo e pelos testes
   cli.py              demo no terminal
 data/calendar.json    vagas da semana
-evals/                dataset rotulado + script de comparação
+evals/                conjuntos dev e held-out + script de comparação
 tests/                pytest
 ```
 
