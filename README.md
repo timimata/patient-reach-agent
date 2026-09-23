@@ -1,5 +1,7 @@
 # patient-reach-agent
 
+[![tests](https://github.com/timimata/patient-reach-agent/actions/workflows/tests.yml/badge.svg)](https://github.com/timimata/patient-reach-agent/actions/workflows/tests.yml)
+
 To prepare for my interview at Wilco, I built a simplified, tested version of the kind of problem
 Wilco solves: the **Reach** phase, turning a patient's enquiry into a booked appointment. The goal is
 to show how I think about it. It is not a replica of the product: only the decision logic, in text,
