@@ -117,6 +117,8 @@ por isso os números da baseline são otimistas.
 
 ## Como correr
 
+Requer Python 3.10 ou superior.
+
 ```bash
 python -m venv .venv
 .venv\Scripts\activate            # Windows  (macOS/Linux: source .venv/bin/activate)
