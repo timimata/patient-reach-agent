@@ -184,6 +184,10 @@ cliente falso, mas não o corri contra a API real.
 - Templates rígidos: gerar o texto com o LLM tornaria as mensagens mais naturais, mas precisaria de
   avaliação própria (tom, nenhuma promessa que o código não fez).
 - Estado em memória e timers simulados; em produção seriam uma base de dados e um scheduler.
+- **Um lembrete adiado não é cancelado.** Se o prazo de resposta expira às 23:30, o lembrete fica
+  para as 09:00 (guardrail), mas se o paciente responder entretanto (por exemplo às 07:30), a
+  simulação envia-o na mesma. Em produção, o scheduler cancelaria o envio pendente quando chega
+  uma resposta.
 
 ## Estrutura
 
