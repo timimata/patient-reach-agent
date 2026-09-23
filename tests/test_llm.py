@@ -63,6 +63,14 @@ def test_prompt_carries_the_conversation_context():
     assert request["response_format"]["json_schema"]["strict"] is True
 
 
+def test_prompt_says_when_there_is_nothing_to_accept():
+    extractor, completions = extractor_returning(reading())
+    extractor.extract("Pode ser hoje às 16h30?", ExtractionContext(now=mon(14), phase=Phase.AWAITING_REPLY))
+    assert "Nothing has been proposed or offered" in completions.requests[0]["messages"][0]["content"]
+    extractor.extract("A primeira", OFFERING)
+    assert "Nothing has been proposed" not in completions.requests[1]["messages"][0]["content"]
+
+
 def test_deepseek_uses_json_mode_without_reasoning():
     # DeepSeek has no server-side schema, only JSON mode (which needs "json" in the prompt),
     # and its default reasoning mode takes ~10 s per message: too slow for a phone call.

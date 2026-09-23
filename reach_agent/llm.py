@@ -65,7 +65,8 @@ intent:
   being contacted, prices or insurance, or anything else beyond routine scheduling. This
   wins even if the message also contains scheduling details. If in doubt, choose it.
 - "accept": agrees to the call time the assistant proposed, or picks one of the offered
-  appointment options.
+  appointment options. Only possible when something was proposed or offered (see below);
+  otherwise a patient suggesting a time is "scheduling".
 - "scheduling": wants an appointment and/or says when they are available.
 - "unclear": none of the above.
 
@@ -101,6 +102,8 @@ def build_prompt(context: ExtractionContext) -> str:
     if context.offered_slots:
         lines.append("Appointment options the assistant offered:")
         lines += [f"  {number}. {_format(slot)}" for number, slot in enumerate(context.offered_slots, 1)]
+    if not context.proposed_call_at and not context.offered_slots:
+        lines.append("Nothing has been proposed or offered to the patient yet.")
     if context.history:
         lines.append("Recent conversation, oldest first:")
         lines += [f"  {turn.speaker}: {' / '.join(turn.text.splitlines())}" for turn in context.history]
