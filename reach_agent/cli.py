@@ -13,7 +13,7 @@ from datetime import datetime
 from .agent import ReachAgent
 from .clinic_calendar import Calendar
 from .llm import PROVIDERS, LLMExtractor
-from .models import Channel, Conversation, Outbound, OutboundKind, Phase
+from .models import Channel, Conversation, Outbound, OutboundKind, Phase, TimePreference
 from .simulation import Simulation
 
 DEMO_START = datetime(2026, 9, 21, 14, 14)  # a Monday, matching data/calendar.json
@@ -92,8 +92,9 @@ def _show(outbound: list[Outbound]) -> None:
 def _print_state(conv: Conversation) -> None:
     print(f"  fase: {conv.phase.value} | canal: {conv.channel.value} | sem resposta seguidas: {conv.unanswered}"
           f" | clarificações: {conv.clarifications}")
-    print(f"  preferência lembrada: {conv.preference}")
-    print(f"  próxima chamada: {conv.next_call_at} | proposta pendente: {conv.proposed_call_at}")
+    print(f"  preferência lembrada: {describe(conv.preference)}")
+    print(f"  próxima chamada: {_stamp_or_dash(conv.next_call_at)} | "
+          f"proposta pendente: {_stamp_or_dash(conv.proposed_call_at)}")
 
 
 def _print_outcome(conv: Conversation | None) -> None:
@@ -110,11 +111,26 @@ def _print_outcome(conv: Conversation | None) -> None:
             "at": handoff.at,
             "trigger": handoff.trigger,
             "phase_before": handoff.phase_before.value,
-            "preference": handoff.preference,
+            "preference": describe(handoff.preference),
             "transcript": [f"{_stamp(t.at)} {t.speaker}/{t.channel.value}: {t.text}" for t in handoff.transcript],
         })
     else:
         print(f"Simulação interrompida na fase {conv.phase.value}.")
+
+
+def describe(preference: TimePreference) -> str:
+    """'depois das 18:00', 'ter 22/09, entre as 09:00 e as 13:00', ... for people, not repr()."""
+    earliest, latest = preference.earliest, preference.latest
+    if earliest and latest:
+        hours = f"às {earliest:%H:%M}" if earliest == latest else f"entre as {earliest:%H:%M} e as {latest:%H:%M}"
+    elif earliest:
+        hours = f"depois das {earliest:%H:%M}"
+    elif latest:
+        hours = f"antes das {latest:%H:%M}"
+    else:
+        hours = ""
+    day = f"{WEEKDAYS[preference.day.weekday()]} {preference.day:%d/%m}" if preference.day else ""
+    return ", ".join(part for part in (day, hours) if part) or "nenhuma"
 
 
 def _print_json(data) -> None:
@@ -126,6 +142,10 @@ def _ask(prompt: str) -> str | None:
         return input(prompt)
     except EOFError:
         return None
+
+
+def _stamp_or_dash(moment: datetime | None) -> str:
+    return _stamp(moment) if moment else "-"
 
 
 def _stamp(moment: datetime) -> str:
