@@ -168,9 +168,10 @@ def main(argv: list[str] | None = None) -> None:
     summaries = [summarize(results) for results in runs.values()]
 
     print(f"{args.dataset}: {len(cases)} labelled cases, read as if received {NOW:%Y-%m-%d %H:%M}\n")
-    print(f"{'':18}" + "".join(f"{name:>12}" for name in names))
+    widths = [max(12, len(name) + 2) for name in names]
+    print(f"{'':18}" + "".join(f"{name:>{w}}" for name, w in zip(names, widths)))
     for label, show in ROWS:
-        print(f"{label:18}" + "".join(f"{show(summary):>12}" for summary in summaries))
+        print(f"{label:18}" + "".join(f"{show(s):>{w}}" for s, w in zip(summaries, widths)))
 
     for name, results in runs.items():
         misses = [r for r in results if not r.exact]

@@ -73,7 +73,7 @@ def test_prompt_says_when_there_is_nothing_to_accept():
 
 def test_deepseek_uses_json_mode_without_reasoning():
     # DeepSeek has no server-side schema, only JSON mode (which needs "json" in the prompt),
-    # and its default reasoning mode takes ~10 s per message: too slow for a phone call.
+    # and reasoning is off by default (slower, and no gain measured in the eval).
     extractor, completions = extractor_returning(reading(), provider="deepseek")
     extractor.extract("Podem ligar depois das 18h?", OFFERING)
     request = completions.requests[0]

@@ -30,7 +30,8 @@ class Provider:
 
 PROVIDERS = {
     "openai": Provider("openai", None, "OPENAI_API_KEY", "gpt-4.1-mini", strict_schema=True),
-    # DeepSeek's models reason by default: ~10 s per message, too slow for a phone call.
+    # DeepSeek's models reason by default. On this prompt that measured +60% latency
+    # (1.4 s vs 0.9 s mean) for no change in what the agent does, so it is off by default.
     "deepseek": Provider("deepseek", "https://api.deepseek.com", "DEEPSEEK_API_KEY", "deepseek-flash",
                          strict_schema=False, extra_body={"thinking": {"type": "disabled"}}),
     "deepseek-thinking": Provider("deepseek-thinking", "https://api.deepseek.com", "DEEPSEEK_API_KEY",
