@@ -61,6 +61,7 @@ class ReachAgent:
         return self._no_answer(conv, now, messages.reminder(conv.patient_name))
 
     def on_patient_message(self, conv: Conversation, text: str, now: datetime) -> list[Outbound]:
+        """The patient wrote (or, on a call, said) something."""
         conv.say(now, "patient", conv.channel, text)
         if conv.phase.is_terminal:
             conv.log(now, "message_after_close", phase=conv.phase.value)  # not ours to answer any more
@@ -89,6 +90,10 @@ class ReachAgent:
             conv.log(now, "guardrail_blocked_preference", preference=extraction_to_dict(extraction),
                      proposed=plan.at)
             return [self._reply(conv, messages.propose_call(plan.at, self.window, now), now)]
+        if conv.phase is Phase.CALLING:
+            # A call is already agreed: "ok, obrigado" needs no answer, only a new time changes it.
+            conv.log(now, "no_change", reason="call already agreed")
+            return []
         # vague ("mais logo"), off-topic or a bare "sim" with nothing to agree to
         return self._clarify(conv, messages.ask_call_time(self.window), now)
 

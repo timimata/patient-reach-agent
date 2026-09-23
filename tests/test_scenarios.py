@@ -236,6 +236,18 @@ def test_pending_callback_can_be_rescheduled(simulate):
     assert sim.conv.next_call_at == callback.at == mon(19)
 
 
+def test_thanks_after_the_callback_is_agreed_changes_nothing(simulate):
+    sim = simulate({ENQUIRY: scheduling(), AFTER_SIX: scheduling(earliest="18:00"),
+                    "Ok, obrigado!": accept()})
+    sim.enquiry(ENQUIRY)
+    sim.call(answered=False)
+    sim.patient(AFTER_SIX, at=mon(14, 40))
+
+    assert sim.patient("Ok, obrigado!") == []  # no "sorry, I didn't understand"
+    assert sim.conv.next_call_at == mon(18)
+    assert sim.conv.clarifications == 0
+
+
 def test_new_preference_during_the_call_reoffers_matching_slots(simulate):
     sim = simulate({ENQUIRY: scheduling(), "Nenhuma dá. Tem na sexta?": scheduling(day=fri(0).date()),
                     "A segunda": accept(option=2)})
