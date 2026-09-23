@@ -39,8 +39,9 @@ def scheduling(earliest: str | None = None, latest: str | None = None, day=None)
     return Extraction(Intent.SCHEDULING, TimePreference(day, _time(earliest), _time(latest)))
 
 
-def accept(option: int | None = None) -> Extraction:
-    return Extraction(Intent.ACCEPT, option=option)
+def accept(option: int | None = None, at: str | None = None) -> Extraction:
+    """`at`: a time the patient mentions while agreeing ("sim, às 9h")."""
+    return Extraction(Intent.ACCEPT, TimePreference(None, _time(at), _time(at)), option=option)
 
 
 def needs_human(reason: str) -> Extraction:

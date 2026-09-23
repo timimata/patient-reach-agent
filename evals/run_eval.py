@@ -38,6 +38,8 @@ DATASETS = {
 NOW = datetime(2026, 9, 21, 14, 14)  # every case is read as if it arrived at this moment (a Monday)
 # The fields agent.py actually reads for each intent. Anything else the extractor fills in
 # (e.g. the time of the option the patient picked) changes nothing, so it is not an error.
+# One exception: for "accept" the agent also reads a time that contradicts its own proposal
+# ("sim, mas às 10h"); no dataset case contains that, so only the option is compared.
 ACTED_ON = {
     Intent.SCHEDULING: ("date", "earliest", "latest"),
     Intent.ACCEPT: ("option",),

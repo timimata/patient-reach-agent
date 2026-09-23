@@ -36,17 +36,9 @@ class Calendar:
     ) -> list[datetime]:
         """The earliest free slots after `after` that fit the preference."""
         free = (s for s in self._slots if s > after and s not in self._booked)
-        return [s for s in free if _fits(s, preference)][:limit]
+        return [s for s in free if preference.admits(s)][:limit]
 
     def book(self, slot: datetime) -> None:
         if slot not in self._slots or slot in self._booked:
             raise SlotUnavailable(slot)
         self._booked.add(slot)
-
-
-def _fits(slot: datetime, preference: TimePreference) -> bool:
-    return (
-        (preference.day is None or slot.date() == preference.day)
-        and (preference.earliest is None or slot.time() >= preference.earliest)
-        and (preference.latest is None or slot.time() <= preference.latest)
-    )

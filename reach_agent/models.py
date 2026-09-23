@@ -44,6 +44,14 @@ class TimePreference:
     def is_specific(self) -> bool:
         return any(value is not None for value in (self.day, self.earliest, self.latest))
 
+    def admits(self, moment: datetime) -> bool:
+        """Whether `moment` is consistent with everything the patient said."""
+        return (
+            (self.day is None or moment.date() == self.day)
+            and (self.earliest is None or moment.time() >= self.earliest)
+            and (self.latest is None or moment.time() <= self.latest)
+        )
+
 
 @dataclass(frozen=True)
 class Extraction:

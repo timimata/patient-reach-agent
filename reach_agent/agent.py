@@ -8,6 +8,7 @@ around by a cleverly worded message.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime
 from time import perf_counter
 
@@ -79,7 +80,12 @@ class ReachAgent:
     def _on_call_time_answer(self, conv: Conversation, extraction: Extraction, now: datetime) -> list[Outbound]:
         """AWAITING_REPLY or CALLING: the patient is telling us when to call."""
         if extraction.intent is Intent.ACCEPT and conv.proposed_call_at is not None:
-            return self._confirm_call(conv, conv.proposed_call_at, now)  # "sim" to what we proposed
+            if extraction.preference.admits(conv.proposed_call_at):
+                return self._confirm_call(conv, conv.proposed_call_at, now)  # "sim" to what we proposed
+            # "sim, mas às 10h": a time the patient states wins over the one we proposed
+            conv.log(now, "proposal_countered", proposed=conv.proposed_call_at,
+                     said=extraction_to_dict(extraction))
+            extraction = replace(extraction, intent=Intent.SCHEDULING)
         if extraction.intent is Intent.SCHEDULING and extraction.preference.is_specific:
             conv.preference = extraction.preference
             plan = plan_contact(extraction.preference, now, self.window)

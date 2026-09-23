@@ -120,6 +120,28 @@ def test_patient_can_counter_propose_a_valid_time(simulate):
     assert callback.at == mon(19, 30)
 
 
+def test_yes_but_another_time_uses_the_new_time(simulate):
+    sim = simulate({ENQUIRY: scheduling(), AFTER_NINE_PM: scheduling(earliest="21:00"),
+                    "Sim, mas só às 10h": accept(at="10:00")})
+    sim.enquiry(ENQUIRY)
+    sim.call(answered=False)
+    sim.patient(AFTER_NINE_PM, at=mon(14, 40))  # we propose tomorrow at 09:00
+
+    confirmation, callback = sim.patient("Sim, mas só às 10h")
+    assert callback.at == tue(10)  # the time they just gave, not our 09:00
+    assert sim.conv.proposed_call_at is None
+
+
+def test_yes_repeating_the_proposed_time_confirms_it(simulate):
+    sim = simulate({ENQUIRY: scheduling(), AFTER_NINE_PM: scheduling(earliest="21:00"),
+                    "Sim, às 9h está ótimo": accept(at="09:00")})
+    sim.enquiry(ENQUIRY)
+    sim.call(answered=False)
+    sim.patient(AFTER_NINE_PM, at=mon(14, 40))
+    confirmation, callback = sim.patient("Sim, às 9h está ótimo")
+    assert callback.at == tue(9)
+
+
 def test_enquiry_arriving_at_night_is_first_called_next_morning(simulate):
     sim = simulate({ENQUIRY: scheduling()}, start=mon(22, 30))
     [call] = sim.enquiry(ENQUIRY)
