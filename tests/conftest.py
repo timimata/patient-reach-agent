@@ -9,6 +9,8 @@ from reach_agent.llm import PROVIDERS, LLMExtractor
 from reach_agent.simulation import Simulation
 from tests.helpers import SLOTS, TAKEN, check_invariants, mon
 
+DEFAULT_START = mon(14, 14)
+
 
 def pytest_addoption(parser):
     parser.addoption("--llm", choices=sorted(PROVIDERS), default=None, metavar="PROVIDER",
@@ -59,7 +61,7 @@ def _checked_simulations(make_extractor):
     """Every simulation created is checked against the safety invariants at the end."""
     created = []
 
-    def factory(labels, start=mon(14, 14)):
+    def factory(labels, start=DEFAULT_START):
         agent = ReachAgent(make_extractor(labels), Calendar(SLOTS, booked=TAKEN))
         created.append(Simulation(agent, start))
         return created[-1]

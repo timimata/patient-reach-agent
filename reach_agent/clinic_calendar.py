@@ -12,6 +12,7 @@ from pathlib import Path
 from .models import TimePreference
 
 DEFAULT_PATH = Path(__file__).resolve().parent.parent / "data" / "calendar.json"
+ANY_TIME = TimePreference()
 
 
 class SlotUnavailable(Exception):
@@ -31,7 +32,7 @@ class Calendar:
         return cls(slots, booked)
 
     def free_slots(
-        self, after: datetime, preference: TimePreference = TimePreference(), limit: int = 3
+        self, after: datetime, preference: TimePreference = ANY_TIME, limit: int = 3
     ) -> list[datetime]:
         """The earliest free slots after `after` that fit the preference."""
         free = (s for s in self._slots if s > after and s not in self._booked)

@@ -34,7 +34,8 @@ def test_normalize_strips_accents_and_case():
 def test_time_preferences(message, day, earliest, latest):
     extraction = read(message)
     assert extraction.intent is Intent.SCHEDULING
-    assert (extraction.preference.day, extraction.preference.earliest, extraction.preference.latest) == (day, earliest, latest)
+    preference = extraction.preference
+    assert (preference.day, preference.earliest, preference.latest) == (day, earliest, latest)
 
 
 def test_greeting_is_not_a_time_preference():

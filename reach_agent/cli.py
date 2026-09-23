@@ -76,7 +76,7 @@ def _make_extractor(provider: str | None):
         return LLMExtractor(provider)
     except Exception as exc:  # missing package or API key
         raise SystemExit(f"Não foi possível usar o LLM ({exc}). Define {PROVIDERS[provider].key_env} "
-                         "ou corre sem --llm.")
+                         "ou corre sem --llm.") from exc
 
 
 def _show(outbound: list[Outbound]) -> None:

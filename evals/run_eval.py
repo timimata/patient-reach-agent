@@ -169,9 +169,9 @@ def main(argv: list[str] | None = None) -> None:
 
     print(f"{args.dataset}: {len(cases)} labelled cases, read as if received {NOW:%Y-%m-%d %H:%M}\n")
     widths = [max(12, len(name) + 2) for name in names]
-    print(f"{'':18}" + "".join(f"{name:>{w}}" for name, w in zip(names, widths)))
+    print(f"{'':18}" + "".join(f"{name:>{w}}" for name, w in zip(names, widths, strict=True)))
     for label, show in ROWS:
-        print(f"{label:18}" + "".join(f"{show(s):>{w}}" for s, w in zip(summaries, widths)))
+        print(f"{label:18}" + "".join(f"{show(s):>{w}}" for s, w in zip(summaries, widths, strict=True)))
 
     for name, results in runs.items():
         misses = [r for r in results if not r.exact]

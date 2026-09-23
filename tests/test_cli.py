@@ -12,7 +12,7 @@ def run_demo(monkeypatch, capsys, *typed):
         try:
             return next(keys)
         except StopIteration:
-            raise EOFError
+            raise EOFError from None
 
     monkeypatch.setattr("builtins.input", fake_input)
     main([])
