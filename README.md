@@ -111,7 +111,7 @@ its cost and latency.
 
 There are two sets. The **dev** set (35 messages) was used to tune the prompt and the rules. The
 **held-out** set (21 new messages) was written and *committed before* any extractor was run on it
-(commit `004c092`) and has never been used to tune anything. It is the honest estimate.
+(commit `2fdec32`) and has never been used to tune anything. It is the honest estimate.
 
 | | rules | `deepseek` | `deepseek-thinking` |
 |---|---|---|---|
@@ -136,14 +136,14 @@ What this taught me:
 - **The LLM's first run looked worse than the regex** (71% vs 80% exact extraction). But 7 of its 10
   failures were the eval penalising fields the agent never reads: the time of the chosen option,
   next to the correct option number. I fixed the metric to compare only what the agent uses for each
-  intent, and re-scored the baseline under the same rule (`9012ba8`).
+  intent, and re-scored the baseline under the same rule (`0e9ecab`).
 - The 3 real failures had one cause: the model answered `accept` when nothing had been proposed. I
   fixed them with a general rule in the prompt, without copying the failing messages into it
-  (`d25cd9c`). Dev went from 91% to 100%, and the held-out set then scored 95%.
+  (`e33bea9`). Dev went from 91% to 100%, and the held-out set then scored 95%.
 - **Reasoning doesn't pay off here.** It costs +60% latency with no improvement: each mode has one
   miss, on different sets, and both lead to the same clarifying question. In a voice agent, latency
   is patient experience, so reasoning is off by default. An early probe with a vague prompt suggested
-  ~10 s per message; measured on the real prompt it is 1.4 s (`da5de63`).
+  ~10 s per message; measured on the real prompt it is 1.4 s (`34c121e`).
 
 ## How to run
 
