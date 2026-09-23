@@ -7,6 +7,18 @@ Wilco solves: the **Reach** phase, turning a patient's enquiry into a booked app
 to show how I think about it. It is not a replica of the product: only the decision logic, in text,
 with no real telephony, and most of the effort went into testing it properly.
 
+**In 30 seconds**
+
+- **What:** Wilco's Reach flow as a tested simulation: enquiry → missed call → WhatsApp → callback →
+  booked, with contact-hour guardrails and human handoff.
+- **Design:** the LLM only *reads* messages into validated JSON; every decision is plain, tested code.
+- **Headline result:** on 21 held-out messages, a regex baseline sent **40%** of the messages that
+  needed a human to one; the LLM (DeepSeek) sent **100%**, at ~0.9 s per message.
+- **Also:** an optional adapter connects the same agent to real WhatsApp through Twilio's sandbox,
+  without changing the agent.
+- **Run:** `pip install -r requirements.txt`, then `pytest` (offline, under a second) and
+  `python -m reach_agent` (terminal demo).
+
 ```
 [seg 21/09 14:14] [chamada agendada]
 [seg 21/09 14:14] O agente liga ao paciente. Atender? (s/n)> n
