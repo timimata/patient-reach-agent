@@ -2,7 +2,8 @@
 
 The extractor is scripted, so these tests pin down the agent's *decisions* given a
 reading of each message. Whether a real LLM produces those readings is measured
-separately (tests/test_eval.py and evals/).
+separately (tests/test_eval.py and evals/). With --llm every scenario also runs
+against the real model.
 """
 
 from datetime import time
@@ -167,8 +168,8 @@ def test_after_handoff_the_agent_stays_silent(simulate):
     assert sim.conv.transcript[-1].text == "Está aí alguém?"  # but kept for the human
 
 
-def test_extraction_failure_hands_off_instead_of_guessing(simulate):
-    sim = simulate({ENQUIRY: scheduling(), AFTER_SIX: ExtractionError("API timeout")})
+def test_extraction_failure_hands_off_instead_of_guessing(simulate_scripted):
+    sim = simulate_scripted({ENQUIRY: scheduling(), AFTER_SIX: ExtractionError("API timeout")})
     sim.enquiry(ENQUIRY)
     sim.call(answered=False)
     sim.patient(AFTER_SIX)
@@ -206,9 +207,9 @@ def test_any_reply_resets_the_unanswered_count(simulate):
 
 # -- conversation memory: adapt and continue, never start over ------------------------------
 
-def test_extractor_reads_each_message_with_the_conversation_as_context(simulate):
-    sim = simulate({ENQUIRY: scheduling(), AFTER_SIX: scheduling(earliest="18:00"),
-                    "A de quarta": accept(option=2)})
+def test_extractor_reads_each_message_with_the_conversation_as_context(simulate_scripted):
+    sim = simulate_scripted({ENQUIRY: scheduling(), AFTER_SIX: scheduling(earliest="18:00"),
+                              "A de quarta": accept(option=2)})
     sim.enquiry(ENQUIRY)
     sim.call(answered=False)
     sim.patient(AFTER_SIX, at=mon(14, 40))

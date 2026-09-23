@@ -22,17 +22,34 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(pytest.mark.skip(reason=reason))
 
 
-@pytest.fixture
-def simulate():
-    """Factory: simulate(labels, start) -> a Simulation whose extractor returns `labels`.
+def _real_llm(labels):
+    from reach_agent.llm import OpenAIExtractor
+    return OpenAIExtractor()  # ignores the labels: the model has to read the messages itself
 
-    Every simulation created through it is checked against the safety invariants
-    when the test finishes.
+
+@pytest.fixture(params=["scripted", pytest.param("openai", marks=pytest.mark.llm)])
+def simulate(request):
+    """Factory: simulate(labels, start) -> a Simulation of one conversation.
+
+    With the scripted extractor, `labels` say what each message means, so the test pins
+    down the agent's decisions. With --llm the same scenario also runs end to end with
+    the real model, whose readings must lead to the same outcome.
     """
+    yield from _checked_simulations(ScriptedExtractor if request.param == "scripted" else _real_llm)
+
+
+@pytest.fixture
+def simulate_scripted():
+    """Same as `simulate`, for tests that need something a real model can't be told to do."""
+    yield from _checked_simulations(ScriptedExtractor)
+
+
+def _checked_simulations(make_extractor):
+    """Every simulation created is checked against the safety invariants at the end."""
     created = []
 
     def factory(labels, start=mon(14, 14)):
-        agent = ReachAgent(ScriptedExtractor(labels), Calendar(SLOTS, booked=TAKEN))
+        agent = ReachAgent(make_extractor(labels), Calendar(SLOTS, booked=TAKEN))
         created.append(Simulation(agent, start))
         return created[-1]
 
