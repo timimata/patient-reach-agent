@@ -76,9 +76,9 @@ The flow follows the example Wilco shows on [getwilco.ai](https://getwilco.ai):
 
 ## Scope: what was left out and why
 
-- **No real telephony or WhatsApp.** What I wanted to show is the decision logic and how to test it.
-  Integrating Twilio / WhatsApp Business would have spent the available time on API plumbing rather
-  than reasoning. `Outbound` and `Channel` mark where that integration would plug in.
+- **No real telephony.** What I wanted to show is the decision logic and how to test it; the calls
+  are simulated. WhatsApp was added later as an optional live demo (see below), through the
+  `Outbound` / `Channel` seams and without changing the agent.
 - Only the Reach phase, text only, a simulated clock (fixed on a Monday, the same in tests and demo),
   one clinic, an in-memory calendar and no time zones.
 
