@@ -1,7 +1,8 @@
 """Score extractors against the labelled dataset in evals/dataset.jsonl.
 
     python -m evals.run_eval                 # rule-based baseline only (free, offline)
-    python -m evals.run_eval rules openai    # side by side; needs OPENAI_API_KEY
+    python -m evals.run_eval rules deepseek  # side by side; needs DEEPSEEK_API_KEY
+                                             # (providers: see reach_agent/llm.py)
 
 Metrics, in the order they matter for this product:
   handoff recall   every message that needs a human gets one (safety: must be 100%)
@@ -139,7 +140,8 @@ ROWS = (
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Compare extractors on the labelled dataset.")
-    parser.add_argument("extractors", nargs="*", default=["rules"], help="rules and/or openai")
+    parser.add_argument("extractors", nargs="*", default=["rules"],
+                        help="rules and/or LLM providers from reach_agent/llm.py")
     names = parser.parse_args(argv).extractors
 
     cases = load_cases()
@@ -168,10 +170,10 @@ def _make(name: str) -> Extractor:
     if name == "rules":
         from reach_agent.rules import RuleBasedExtractor
         return RuleBasedExtractor()
-    if name == "openai":
-        from reach_agent.llm import OpenAIExtractor
-        return OpenAIExtractor()
-    raise SystemExit(f"unknown extractor {name!r}; use rules and/or openai")
+    from reach_agent.llm import PROVIDERS, LLMExtractor
+    if name in PROVIDERS:
+        return LLMExtractor(name)
+    raise SystemExit(f"unknown extractor {name!r}; use rules and/or {', '.join(PROVIDERS)}")
 
 
 def _share(flags: list[bool]) -> float:

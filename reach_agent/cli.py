@@ -1,7 +1,7 @@
 """Terminal demo: you play the patient, the agent runs on a simulated clock.
 
-    python -m reach_agent            # offline, rule-based extractor
-    python -m reach_agent --openai   # real LLM (needs OPENAI_API_KEY)
+    python -m reach_agent                  # offline, rule-based extractor
+    python -m reach_agent --llm deepseek   # real LLM (needs DEEPSEEK_API_KEY; see llm.PROVIDERS)
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ from datetime import datetime
 
 from .agent import ReachAgent
 from .clinic_calendar import Calendar
+from .llm import PROVIDERS, LLMExtractor
 from .models import Channel, Conversation, Outbound, OutboundKind, Phase
 from .simulation import Simulation
 
@@ -23,11 +24,12 @@ HELP = "Comandos: /sem-resposta (o paciente não responde)  /estado  /trace  /sa
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Simulação do agente Reach no terminal.")
-    parser.add_argument("--openai", action="store_true", help="usar o LLM da OpenAI em vez das regras")
+    parser.add_argument("--llm", choices=sorted(PROVIDERS), metavar="PROVIDER",
+                        help=f"usar um LLM ({', '.join(PROVIDERS)}) em vez das regras")
     parser.add_argument("--name", default="Ana", help="nome do paciente")
     args = parser.parse_args(argv)
 
-    extractor = _make_extractor(args.openai)
+    extractor = _make_extractor(args.llm)
     agent = ReachAgent(extractor, Calendar.from_json())
     sim = Simulation(agent, DEMO_START, patient_name=args.name)
     window = agent.window
@@ -66,15 +68,15 @@ def main(argv: list[str] | None = None) -> None:
     _print_outcome(sim.conv)
 
 
-def _make_extractor(use_openai: bool):
-    if not use_openai:
+def _make_extractor(provider: str | None):
+    if provider is None:
         from .rules import RuleBasedExtractor
         return RuleBasedExtractor()
-    from .llm import OpenAIExtractor
     try:
-        return OpenAIExtractor()
+        return LLMExtractor(provider)
     except Exception as exc:  # missing package or API key
-        raise SystemExit(f"Não foi possível usar a OpenAI ({exc}). Define OPENAI_API_KEY ou corre sem --openai.")
+        raise SystemExit(f"Não foi possível usar o LLM ({exc}). Define {PROVIDERS[provider].key_env} "
+                         "ou corre sem --llm.")
 
 
 def _show(outbound: list[Outbound]) -> None:

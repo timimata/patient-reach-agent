@@ -1,4 +1,4 @@
-"""OpenAIExtractor without the network: a fake client stands in for the API."""
+"""LLMExtractor without the network: a fake client stands in for the API."""
 
 import json
 from types import SimpleNamespace
@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from reach_agent.extraction import ExtractionContext, ExtractionError
-from reach_agent.llm import OpenAIExtractor
+from reach_agent.llm import LLMExtractor
 from reach_agent.models import Channel, Intent, Phase, Turn
 from tests.helpers import mon, thu, tue, wed
 
@@ -31,10 +31,10 @@ class FakeCompletions:
                                usage=SimpleNamespace(total_tokens=120))
 
 
-def extractor_returning(content=None, error=None):
+def extractor_returning(content=None, error=None, provider="openai"):
     completions = FakeCompletions(content, error)
     client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
-    return OpenAIExtractor(model="test-model", client=client), completions
+    return LLMExtractor(provider, model="test-model", client=client), completions
 
 
 def reading(**fields):
@@ -63,6 +63,23 @@ def test_prompt_carries_the_conversation_context():
     assert request["response_format"]["json_schema"]["strict"] is True
 
 
+def test_deepseek_uses_json_mode_without_reasoning():
+    # DeepSeek has no server-side schema, only JSON mode (which needs "json" in the prompt),
+    # and its default reasoning mode takes ~10 s per message: too slow for a phone call.
+    extractor, completions = extractor_returning(reading(), provider="deepseek")
+    extractor.extract("Podem ligar depois das 18h?", OFFERING)
+    request = completions.requests[0]
+    assert request["response_format"] == {"type": "json_object"}
+    assert request["extra_body"] == {"thinking": {"type": "disabled"}}
+    assert "json" in request["messages"][0]["content"]
+    assert extractor.name == "deepseek"
+
+
+def test_unknown_provider_is_rejected():
+    with pytest.raises(ValueError):
+        LLMExtractor("gemini", client=object())
+
+
 @pytest.mark.parametrize(
     "content, error",
     [
@@ -70,6 +87,7 @@ def test_prompt_carries_the_conversation_context():
         ("this is not json", None),
         (reading(intent="book_it"), None),     # valid JSON, invalid reading
         (reading(earliest="6pm"), None),
+        ("[1, 2]", None),                      # valid JSON, but not an object
     ],
 )
 def test_anything_unexpected_raises_extraction_error(content, error):
@@ -84,7 +102,7 @@ def test_option_outside_the_offer_is_dropped():
 
 
 @pytest.mark.llm
-def test_real_api_smoke():
-    """One real call, only with --llm: checks the key, model and schema are accepted."""
-    extraction = OpenAIExtractor().extract("Podem ligar depois das 18h?", OFFERING)
+def test_real_api_smoke(llm_provider):
+    """One real call, only with --llm: checks the key, model and request format are accepted."""
+    extraction = LLMExtractor(llm_provider).extract("Podem ligar depois das 18h?", OFFERING)
     assert extraction.intent is Intent.SCHEDULING

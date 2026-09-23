@@ -1,2 +1,2 @@
 pytest>=8
-openai>=1.40  # only needed to use the real LLM (demo --openai, pytest --llm, evals)
+openai>=1.40  # OpenAI-compatible client; only needed for a real LLM (OpenAI or DeepSeek)

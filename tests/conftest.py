@@ -5,29 +5,32 @@ import pytest
 from reach_agent.agent import ReachAgent
 from reach_agent.clinic_calendar import Calendar
 from reach_agent.extraction import ScriptedExtractor
+from reach_agent.llm import PROVIDERS, LLMExtractor
 from reach_agent.simulation import Simulation
 from tests.helpers import SLOTS, TAKEN, check_invariants, mon
 
 
 def pytest_addoption(parser):
-    parser.addoption("--llm", action="store_true", help="also run tests that call the OpenAI API (costs credits)")
+    parser.addoption("--llm", choices=sorted(PROVIDERS), default=None, metavar="PROVIDER",
+                     help=f"also run tests that call a real LLM ({', '.join(PROVIDERS)}); costs credits")
 
 
 def pytest_collection_modifyitems(config, items):
-    if config.getoption("--llm") and os.environ.get("OPENAI_API_KEY"):
+    provider = config.getoption("--llm")
+    if provider and os.environ.get(PROVIDERS[provider].key_env):
         return
-    reason = "needs OPENAI_API_KEY" if config.getoption("--llm") else "calls the OpenAI API; run with --llm"
+    reason = f"needs {PROVIDERS[provider].key_env}" if provider else "calls a real LLM; run with --llm PROVIDER"
     for item in items:
         if "llm" in item.keywords:
             item.add_marker(pytest.mark.skip(reason=reason))
 
 
-def _real_llm(labels):
-    from reach_agent.llm import OpenAIExtractor
-    return OpenAIExtractor()  # ignores the labels: the model has to read the messages itself
+@pytest.fixture
+def llm_provider(request):
+    return request.config.getoption("--llm")
 
 
-@pytest.fixture(params=["scripted", pytest.param("openai", marks=pytest.mark.llm)])
+@pytest.fixture(params=["scripted", pytest.param("llm", marks=pytest.mark.llm)])
 def simulate(request):
     """Factory: simulate(labels, start) -> a Simulation of one conversation.
 
@@ -35,7 +38,15 @@ def simulate(request):
     down the agent's decisions. With --llm the same scenario also runs end to end with
     the real model, whose readings must lead to the same outcome.
     """
-    yield from _checked_simulations(ScriptedExtractor if request.param == "scripted" else _real_llm)
+    if request.param == "scripted":
+        yield from _checked_simulations(ScriptedExtractor)
+        return
+    provider = request.config.getoption("--llm")
+
+    def real_llm(labels):  # ignores the labels: the model has to read the messages itself
+        return LLMExtractor(provider)
+
+    yield from _checked_simulations(real_llm)
 
 
 @pytest.fixture
