@@ -1,12 +1,18 @@
 """WhatsApp transport without the network: requests are signed locally with a test token."""
 
+import queue
+
 import pytest
 from fastapi.testclient import TestClient
 from twilio.request_validator import RequestValidator
 
-from reach_agent.models import Channel, Conversation
+from reach_agent.agent import ReachAgent
+from reach_agent.clinic_calendar import Calendar
+from reach_agent.extraction import ScriptedExtractor
+from reach_agent.models import Channel, Conversation, Outbound, OutboundKind, Phase
 from reach_agent.whatsapp import InboundMessage, can_send_free_form, create_app
-from tests.helpers import mon, tue, wed
+from reach_agent.whatsapp_demo import deliver, run
+from tests.helpers import SLOTS, TAKEN, accept, check_invariants, mon, scheduling, tue, wed
 
 TOKEN = "test-auth-token"
 URL = "https://example.ngrok-free.app/whatsapp"
@@ -85,3 +91,75 @@ def test_a_new_patient_message_reopens_the_window():
 def test_speaking_on_a_call_does_not_open_the_whatsapp_window():
     conv = conversation_with((mon(18, 0), Channel.VOICE))  # e.g. an enquiry that came by phone
     assert not can_send_free_form(conv, mon(18, 5))
+
+
+# -- the live demo loop, with a fake Twilio sender -------------------------------------------
+
+ENQUIRY = "Olá, queria marcar uma consulta"
+AFTER_SIX = "Estou a trabalhar, podem ligar depois das 18h?"
+
+
+class FakeSender:
+    def __init__(self, error=None):
+        self.sent, self.error = [], error
+
+    def send(self, to, text):
+        if self.error:
+            raise self.error
+        self.sent.append((to, text))
+
+
+def events(*items):
+    q = queue.Queue()
+    for item in (*items, ("terminal", "/sair")):  # /sair last: the loop can never block forever
+        q.put(item)
+    return q
+
+
+def whatsapp(sid, text, sender=PATIENT):
+    return ("whatsapp", InboundMessage(sid, sender, "Ana", text))
+
+
+def agent():
+    labels = {ENQUIRY: scheduling(), AFTER_SIX: scheduling(earliest="18:00"), "A primeira": accept(option=1)}
+    return ReachAgent(ScriptedExtractor(labels), Calendar(SLOTS, booked=TAKEN))
+
+
+def test_live_demo_books_through_whatsapp_and_a_simulated_call(capsys):
+    sender = FakeSender()
+    sim = run(events(whatsapp("SM1", ENQUIRY), ("terminal", "n"), whatsapp("SM2", AFTER_SIX),
+                     ("terminal", "s"), ("terminal", "A primeira")), agent(), sender, start=mon(14, 14))
+
+    assert sim.conv.phase is Phase.BOOKED and sim.conv.booked_slot == tue(18, 30)
+    # only WhatsApp actions reach the phone; the offer and booking happened on the (simulated) call
+    assert [to for to, _ in sender.sent] == [PATIENT, PATIENT]
+    assert "Tentámos ligar-lhe" in sender.sent[0][1]
+    assert sender.sent[1][1] == "Combinado! Ligamos-lhe hoje às 18:00."
+    assert "Voz | Agente: Olá Ana" in capsys.readouterr().out
+    check_invariants(sim)
+
+
+def test_live_demo_follows_one_patient_at_a_time(capsys):
+    sender = FakeSender()
+    sim = run(events(whatsapp("SM1", ENQUIRY), whatsapp("SM2", "Olá!", sender="whatsapp:+351920000000")),
+              agent(), sender, start=mon(14, 14))
+    assert [turn.text for turn in sim.conv.transcript if turn.speaker == "patient"] == [ENQUIRY]
+    assert "ignorado" in capsys.readouterr().out
+
+
+def test_deliver_refuses_free_form_outside_the_24h_window(capsys):
+    conv = conversation_with((mon(14, 14), Channel.WHATSAPP))
+    late = Outbound(OutboundKind.OUTREACH, Channel.WHATSAPP, wed(9, 0), "Olá Ana, ...")
+    sender = FakeSender()
+    deliver([late], conv, PATIENT, sender)
+    assert sender.sent == []
+    assert conv.events[-1]["event"] == "whatsapp_blocked"
+    assert "BLOQUEADO" in capsys.readouterr().out
+
+
+def test_a_failed_send_is_reported_not_fatal(capsys):
+    conv = conversation_with((mon(14, 14), Channel.WHATSAPP))
+    message = Outbound(OutboundKind.REPLY, Channel.WHATSAPP, mon(14, 20), "Combinado!")
+    deliver([message], conv, PATIENT, FakeSender(error=ConnectionError("no network")))
+    assert conv.events[-1]["event"] == "whatsapp_send_failed"
+    assert "FALHOU" in capsys.readouterr().out

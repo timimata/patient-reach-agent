@@ -29,25 +29,25 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--name", default="Ana", help="nome do paciente")
     args = parser.parse_args(argv)
 
-    extractor = _make_extractor(args.llm)
+    extractor = make_extractor(args.llm)
     agent = ReachAgent(extractor, Calendar.from_json())
     sim = Simulation(agent, DEMO_START, patient_name=args.name)
     window = agent.window
-    print(f"Relógio simulado: {_stamp(DEMO_START)} | contacto permitido "
+    print(f"Relógio simulado: {stamp(DEMO_START)} | contacto permitido "
           f"{window.opens:%H:%M}-{window.closes:%H:%M} | extractor: {extractor.name}")
     print(HELP)
 
     enquiry = _ask(f"\nEnquiry do paciente [{DEFAULT_ENQUIRY}]> ")
     if enquiry is None:
         return
-    _show(sim.enquiry(enquiry or DEFAULT_ENQUIRY))
+    show(sim.enquiry(enquiry or DEFAULT_ENQUIRY))
 
     while not sim.conv.phase.is_terminal:
         if sim.conv.phase is Phase.CALLING:
-            answer = _ask(f"{_stamp(sim.conv.next_call_at)} O agente liga ao paciente. Atender? (s/n)> ")
+            answer = _ask(f"{stamp(sim.conv.next_call_at)} O agente liga ao paciente. Atender? (s/n)> ")
             if answer is None:
                 break
-            _show(sim.call(answered=answer.strip().lower().startswith("s")))
+            show(sim.call(answered=answer.strip().lower().startswith("s")))
             continue
         line = _ask("Paciente> ")
         if line is None or line.strip() == "/sair":
@@ -55,20 +55,20 @@ def main(argv: list[str] | None = None) -> None:
         line = line.strip()
         if line == "/sem-resposta":
             if sim.conv.phase is Phase.AWAITING_REPLY:
-                _show(sim.no_reply())
+                show(sim.no_reply())
             else:
                 print("  (só faz sentido quando o agente está à espera de resposta por WhatsApp)")
         elif line == "/estado":
-            _print_state(sim.conv)
+            print_state(sim.conv)
         elif line == "/trace":
             _print_json(sim.conv.events)
         elif line:
-            _show(sim.patient(line))
+            show(sim.patient(line))
 
-    _print_outcome(sim.conv)
+    print_outcome(sim.conv)
 
 
-def _make_extractor(provider: str | None):
+def make_extractor(provider: str | None):
     if provider is None:
         from .rules import RuleBasedExtractor
         return RuleBasedExtractor()
@@ -79,17 +79,17 @@ def _make_extractor(provider: str | None):
                          "ou corre sem --llm.") from exc
 
 
-def _show(outbound: list[Outbound]) -> None:
+def show(outbound: list[Outbound]) -> None:
     for out in outbound:
         if out.channel is Channel.VOICE and out.kind is OutboundKind.OUTREACH:
-            print(f"{_stamp(out.at)} [chamada agendada]")
+            print(f"{stamp(out.at)} [chamada agendada]")
             continue
         label = "Voz" if out.channel is Channel.VOICE else "WhatsApp"
         text = out.text.replace("\n", "\n" + " " * 8)
-        print(f"{_stamp(out.at)} {label} | Agente: {text}")
+        print(f"{stamp(out.at)} {label} | Agente: {text}")
 
 
-def _print_state(conv: Conversation) -> None:
+def print_state(conv: Conversation) -> None:
     print(f"  fase: {conv.phase.value} | canal: {conv.channel.value} | sem resposta seguidas: {conv.unanswered}"
           f" | clarificações: {conv.clarifications}")
     print(f"  preferência lembrada: {describe(conv.preference)}")
@@ -97,12 +97,12 @@ def _print_state(conv: Conversation) -> None:
           f"proposta pendente: {_stamp_or_dash(conv.proposed_call_at)}")
 
 
-def _print_outcome(conv: Conversation | None) -> None:
+def print_outcome(conv: Conversation | None) -> None:
     if conv is None:
         return
     print()
     if conv.phase is Phase.BOOKED:
-        print(f"Resultado: consulta marcada para {_stamp(conv.booked_slot)}")
+        print(f"Resultado: consulta marcada para {stamp(conv.booked_slot)}")
     elif conv.phase is Phase.HANDED_OFF:
         handoff = conv.handoff
         print(f"Resultado: passado a um humano (motivo: {handoff.reason}). Registo do handoff:")
@@ -112,7 +112,7 @@ def _print_outcome(conv: Conversation | None) -> None:
             "trigger": handoff.trigger,
             "phase_before": handoff.phase_before.value,
             "preference": describe(handoff.preference),
-            "transcript": [f"{_stamp(t.at)} {t.speaker}/{t.channel.value}: {t.text}" for t in handoff.transcript],
+            "transcript": [f"{stamp(t.at)} {t.speaker}/{t.channel.value}: {t.text}" for t in handoff.transcript],
         })
     else:
         print(f"Simulação interrompida na fase {conv.phase.value}.")
@@ -145,8 +145,8 @@ def _ask(prompt: str) -> str | None:
 
 
 def _stamp_or_dash(moment: datetime | None) -> str:
-    return _stamp(moment) if moment else "-"
+    return stamp(moment) if moment else "-"
 
 
-def _stamp(moment: datetime) -> str:
+def stamp(moment: datetime) -> str:
     return f"[{WEEKDAYS[moment.weekday()]} {moment:%d/%m %H:%M}]"
