@@ -9,8 +9,20 @@ the request, so a slow model never makes Twilio time out and send the message ag
 # runtime, and `Request` is imported inside create_app, where a string annotation can't be resolved.
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime, timedelta
+
+from .models import Channel, Conversation
 
 EMPTY_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response />'  # "nothing to reply right now"
+FREE_FORM_WINDOW = timedelta(hours=24)  # WhatsApp's customer-service window
+
+
+def can_send_free_form(conv: Conversation, at: datetime) -> bool:
+    """WhatsApp only allows free-form business messages within 24 h of the patient's last
+    WhatsApp message; outside that window only pre-approved templates may be sent."""
+    last = max((turn.at for turn in conv.transcript
+                if turn.speaker == "patient" and turn.channel is Channel.WHATSAPP), default=None)
+    return last is not None and at - last <= FREE_FORM_WINDOW
 
 
 @dataclass(frozen=True)
