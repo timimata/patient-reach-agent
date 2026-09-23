@@ -10,5 +10,9 @@ select = ["E", "F", "W", "B", "UP", "SIM"]
 testpaths = ["tests"]
 pythonpath = ["."]
 markers = [
-    "llm: calls the real OpenAI API; opt-in with --llm (costs credits)",
+    "llm: calls a real LLM API; opt-in with --llm PROVIDER (costs credits)",
+]
+filterwarnings = [
+    # Raised inside Starlette's test client (a dependency), not by this project's code.
+    "ignore:The anyio.abc.BlockingPortal alias is deprecated:DeprecationWarning",
 ]
