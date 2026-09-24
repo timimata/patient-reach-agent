@@ -1,8 +1,8 @@
 """Live demo on real WhatsApp: the patient writes from a phone, calls stay simulated here.
 
-    python -m reach_agent.whatsapp_demo [--llm deepseek] [--port 8000]
+    python -m reach_agent.whatsapp_demo [--via meta|twilio] [--llm deepseek] [--port 8000]
 
-Each channel has its own transport. WhatsApp messages travel through Twilio to and from
+Each channel has its own transport. WhatsApp messages travel through Meta or Twilio to and from
 the patient's phone; the voice call is simulated in this terminal (you pick up, and type
 what the patient says on the call). The agent is the same one the tests check, on the same
 simulated clock as the terminal demo. One patient at a time, state in memory.
@@ -22,16 +22,19 @@ from .clinic_calendar import Calendar
 from .llm import PROVIDERS
 from .models import Channel, Conversation, Outbound, Phase
 from .simulation import Simulation
-from .whatsapp import TwilioSender, can_send_free_form, create_app
+from .whatsapp import can_send_free_form
 
-ENV = ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_WHATSAPP_FROM", "WHATSAPP_WEBHOOK_URL")
+ENV = {  # what each WhatsApp provider needs, read from the environment so no secret is in the code
+    "meta": ("META_ACCESS_TOKEN", "META_PHONE_NUMBER_ID", "META_APP_SECRET", "META_VERIFY_TOKEN"),
+    "twilio": ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_WHATSAPP_FROM", "WHATSAPP_WEBHOOK_URL"),
+}
 
 
 def run(events: queue.Queue, agent: ReachAgent, sender, start: datetime = DEMO_START) -> Simulation | None:
     """Drive one conversation from ("whatsapp", InboundMessage) and ("terminal", line) events."""
     sim: Simulation | None = None
     patient = ""
-    print("À espera de uma mensagem de WhatsApp no número do sandbox...")
+    print("À espera de uma mensagem de WhatsApp no número da demo...")
     while sim is None or not sim.conv.phase.is_terminal:
         kind, payload = events.get()
         if kind == "terminal" and payload.strip() == "/sair":
@@ -70,7 +73,7 @@ def deliver(outbound: list[Outbound], conv: Conversation, patient: str, sender) 
             continue
         try:
             sender.send(patient, out.text)
-        except Exception as exc:  # network, credentials, Twilio refusing: report it, keep the demo alive
+        except Exception as exc:  # network, credentials, the provider refusing: report it, keep the demo alive
             conv.log(out.at, "whatsapp_send_failed", error=str(exc))
             print(f"{stamp(out.at)} WhatsApp FALHOU: {exc}")
             continue
@@ -107,23 +110,37 @@ def _prompt(conv: Conversation) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(description="Demo com WhatsApp real (Twilio); chamadas simuladas no terminal.")
+    parser = argparse.ArgumentParser(description="Demo com WhatsApp real; chamadas simuladas no terminal.")
+    parser.add_argument("--via", choices=sorted(ENV), default="meta", help="fornecedor de WhatsApp (default: meta)")
     parser.add_argument("--llm", choices=sorted(PROVIDERS), metavar="PROVIDER",
                         help=f"usar um LLM ({', '.join(PROVIDERS)}) em vez das regras")
     parser.add_argument("--port", type=int, default=8000)
     args = parser.parse_args(argv)
-    missing = [name for name in ENV if not os.environ.get(name)]
+    missing = [name for name in ENV[args.via] if not os.environ.get(name)]
     if missing:
         raise SystemExit(f"Faltam variáveis de ambiente: {', '.join(missing)} (ver README).")
-    account_sid, auth_token, from_number, webhook_url = (os.environ[name] for name in ENV)
+    settings = [os.environ[name] for name in ENV[args.via]]
 
     events: queue.Queue = queue.Queue()
-    app = create_app(lambda message: events.put(("whatsapp", message)), auth_token, webhook_url)
+    app, sender = _transport(args.via, settings, lambda message: events.put(("whatsapp", message)))
     _serve(app, args.port)
     threading.Thread(target=_read_terminal, args=(events,), daemon=True).start()
-    print(f"Webhook em http://127.0.0.1:{args.port}/whatsapp, público em {webhook_url}")
+    print(f"Webhook ({args.via}) em http://127.0.0.1:{args.port}/whatsapp")
     agent = ReachAgent(make_extractor(args.llm), Calendar.from_json())
-    run(events, agent, TwilioSender(account_sid, auth_token, from_number))
+    run(events, agent, sender)
+
+
+def _transport(via: str, settings: list[str], on_message):
+    """The webhook app and the sender for one WhatsApp provider."""
+    if via == "meta":
+        from .whatsapp_meta import MetaSender, create_app
+
+        access_token, phone_number_id, app_secret, verify_token = settings
+        return create_app(on_message, app_secret, verify_token), MetaSender(access_token, phone_number_id)
+    from .whatsapp import TwilioSender, create_app
+
+    account_sid, auth_token, from_number, webhook_url = settings
+    return create_app(on_message, auth_token, webhook_url), TwilioSender(account_sid, auth_token, from_number)
 
 
 def _serve(app, port: int) -> None:
