@@ -103,7 +103,7 @@ The flow follows the example Wilco shows on [getwilco.ai](https://getwilco.ai):
 | Scenarios | the agent's **decisions** in whole conversations, with a *scripted* extractor (each test states what each message means) | `tests/test_scenarios.py` |
 | Invariants | rules that must hold in *any* conversation, checked automatically after every scenario: no contact outside hours, nothing after closing, counters within limits. A mutation test disables the guardrail and confirms the check fails | `tests/helpers.py::check_invariants`, `tests/test_invariants.py` |
 | Eval | how well each extractor **reads** messages: 35 development + 21 held-out messages, labelled with the conversation state they arrive in | `evals/` |
-| End-to-end | with `--llm`, the same scenarios run with the real model reading the messages (the last full run with DeepSeek passed 137/137) | `pytest --llm deepseek` |
+| End-to-end | with `--llm`, the same scenarios run with the real model reading the messages (the last full run with DeepSeek, on 24 September, passed 149/149) | `pytest --llm deepseek` |
 | WhatsApp adapters | Meta and Twilio signature checks, Meta's URL verification, retried messages handled once, receipts skipped, the 24-hour window, routing each action to its channel, send failures. Offline, with locally signed requests, a fake sender and a fake Graph API | `tests/test_whatsapp.py`, `test_whatsapp_meta.py` |
 
 The five required cases, in `tests/test_scenarios.py`:
