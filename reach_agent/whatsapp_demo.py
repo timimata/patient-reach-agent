@@ -36,7 +36,7 @@ def run(events: queue.Queue, agent: ReachAgent, sender, start: datetime = DEMO_S
     patient = ""
     print("À espera de uma mensagem de WhatsApp no número da demo...")
     while sim is None or not sim.conv.phase.is_terminal:
-        kind, payload = events.get()
+        kind, payload = _next(events)
         if kind == "terminal" and payload.strip() == "/sair":
             break
         if kind == "whatsapp":
@@ -59,6 +59,15 @@ def run(events: queue.Queue, agent: ReachAgent, sender, start: datetime = DEMO_S
     if sim is not None:
         print_outcome(sim.conv)
     return sim
+
+
+def _next(events: queue.Queue):
+    """Wait for the next event in short slices: on Windows a plain get() can't be interrupted by Ctrl+C."""
+    while True:
+        try:
+            return events.get(timeout=0.5)
+        except queue.Empty:
+            continue
 
 
 def deliver(outbound: list[Outbound], conv: Conversation, patient: str, sender) -> None:
