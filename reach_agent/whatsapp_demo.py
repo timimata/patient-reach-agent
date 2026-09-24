@@ -119,7 +119,7 @@ def main(argv: list[str] | None = None) -> None:
     missing = [name for name in ENV[args.via] if not os.environ.get(name)]
     if missing:
         raise SystemExit(f"Faltam variáveis de ambiente: {', '.join(missing)} (ver README).")
-    settings = [os.environ[name] for name in ENV[args.via]]
+    settings = [os.environ[name].strip() for name in ENV[args.via]]  # a pasted token often ends in a space
 
     events: queue.Queue = queue.Queue()
     app, sender = _transport(args.via, settings, lambda message: events.put(("whatsapp", message)))

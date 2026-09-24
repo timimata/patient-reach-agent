@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from reach_agent.whatsapp import InboundMessage
+from reach_agent.whatsapp_demo import ENV, main
 from reach_agent.whatsapp_meta import GRAPH_API, MetaSender, create_app, text_messages
 
 SECRET = "test-app-secret"
@@ -71,6 +72,12 @@ def test_unsigned_or_forged_notifications_are_rejected(client, received):
     assert received == []
 
 
+def test_a_malformed_signature_header_is_rejected_not_a_crash(client, received):
+    body = json.dumps(notification(text())).encode()
+    response = client.post("/whatsapp", content=body, headers={"X-Hub-Signature-256": "sha256=á".encode()})
+    assert response.status_code == 403 and received == []
+
+
 def test_signature_covers_the_content(client, received):
     signed_for_other_text = sign(json.dumps(notification(text(body="outra coisa"))).encode())
     assert post(client, notification(text()), signature=signed_for_other_text).status_code == 403
@@ -118,3 +125,14 @@ def test_a_refused_send_raises_with_metas_reason():
     _, client = fake_graph(status=400, reply=error)
     with pytest.raises(RuntimeError, match="131030"):
         MetaSender("token-123", "PHONE_ID", client=client).send(PATIENT, "Olá")
+
+
+# -- starting the live demo ---------------------------------------------------------------------
+
+@pytest.mark.parametrize("argv, provider", [([], "meta"), (["--via", "twilio"], "twilio")])
+def test_the_demo_names_the_settings_it_is_missing(monkeypatch, argv, provider):
+    for names in ENV.values():
+        for name in names:
+            monkeypatch.delenv(name, raising=False)
+    with pytest.raises(SystemExit, match=ENV[provider][0]):
+        main(argv)

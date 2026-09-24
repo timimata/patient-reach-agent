@@ -14,13 +14,13 @@ from collections.abc import Callable
 
 from .whatsapp import InboundMessage
 
-GRAPH_API = "https://graph.facebook.com/v23.0"
+GRAPH_API = "https://graph.facebook.com/v26.0"  # latest Graph API version (July 2026)
 
 
 def is_signed(body: bytes, signature: str, app_secret: str) -> bool:
     """Meta signs each notification: "sha256=" + HMAC-SHA256 of the raw body, keyed with the App Secret."""
     expected = "sha256=" + hmac.new(app_secret.encode(), body, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected, signature)
+    return hmac.compare_digest(expected.encode(), signature.encode())  # bytes: any header can't crash it
 
 
 def text_messages(payload: dict) -> list[InboundMessage]:

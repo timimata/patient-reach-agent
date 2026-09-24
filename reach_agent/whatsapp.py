@@ -28,7 +28,7 @@ def can_send_free_form(conv: Conversation, at: datetime) -> bool:
 @dataclass(frozen=True)
 class InboundMessage:
     sid: str
-    sender: str  # "whatsapp:+3519..."
+    sender: str  # the address to reply to: "whatsapp:+3519..." (Twilio) or "3519..." (Meta)
     name: str    # the patient's WhatsApp profile name
     text: str
 
