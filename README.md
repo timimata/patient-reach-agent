@@ -15,8 +15,8 @@ with no real telephony, and most of the effort went into testing it properly.
 - **Headline result:** on 21 held-out messages, a regex baseline sent **40%** of the messages that
   needed a human to one; the LLM (DeepSeek) sent **100%**, in each of 5 runs, at a p95 of ~1 s per
   message.
-- **Also:** an optional adapter connects the same agent to real WhatsApp through Twilio's sandbox,
-  without changing the agent.
+- **Also:** an optional adapter connects the same agent to real WhatsApp (Meta's Cloud API or
+  Twilio) without changing the agent. Tested live: a real phone went from "Olá" to a booking.
 - **Run:** `pip install -r requirements.txt`, then `pytest` (offline, under a second) and
   `python -m reach_agent` (terminal demo).
 
@@ -104,7 +104,7 @@ The flow follows the example Wilco shows on [getwilco.ai](https://getwilco.ai):
 | Invariants | rules that must hold in *any* conversation, checked automatically after every scenario: no contact outside hours, nothing after closing, counters within limits. A mutation test disables the guardrail and confirms the check fails | `tests/helpers.py::check_invariants`, `tests/test_invariants.py` |
 | Eval | how well each extractor **reads** messages: 35 development + 21 held-out messages, labelled with the conversation state they arrive in | `evals/` |
 | End-to-end | with `--llm`, the same scenarios run with the real model reading the messages (the last full run with DeepSeek passed 137/137) | `pytest --llm deepseek` |
-| WhatsApp adapter | Twilio signature check, retried messages handled once, the 24-hour window, routing each action to its channel, send failures. Offline, with locally signed requests and a fake sender | `tests/test_whatsapp.py` |
+| WhatsApp adapters | Meta and Twilio signature checks, Meta's URL verification, retried messages handled once, receipts skipped, the 24-hour window, routing each action to its channel, send failures. Offline, with locally signed requests, a fake sender and a fake Graph API | `tests/test_whatsapp.py`, `test_whatsapp_meta.py` |
 
 The five required cases, in `tests/test_scenarios.py`:
 
@@ -208,45 +208,91 @@ fake client, but I have not run it against the real API.
 
 ## Live on WhatsApp (optional)
 
-The same agent can talk to a real phone over WhatsApp, through Twilio's sandbox. Each channel has
-its own transport: WhatsApp messages go through Twilio to the phone, while the voice call stays
-simulated in the terminal, where you pick up and type what the patient says. `agent.py` did not
-change for this; the adapter only uses the `Outbound` / `Channel` seams that were already there.
+The same agent can talk to a real phone over WhatsApp. Each channel has its own transport:
+WhatsApp messages go through a provider to the phone, while the voice call stays simulated in the
+terminal, where you pick up and type what the patient says. `agent.py` did not change for this; the
+adapters only use the `Outbound` / `Channel` seams that were already there.
 
-What the adapter (`reach_agent/whatsapp.py`) takes care of:
+Tested live on 24 September 2026, from a real phone, through Meta's WhatsApp Cloud API:
 
-- **Authenticity:** every webhook request must carry a valid Twilio signature (forged → 403).
-- **Retries:** Twilio resends a message if it gets no answer; each `MessageSid` is acted on once.
-- **Latency:** the webhook answers Twilio immediately; the agent and its LLM call run outside the
-  request, so a slow model never causes a timeout and a duplicate delivery.
+```
+[seg 21/09 14:14] WhatsApp <- 3519…: Olá, queria marcar uma consulta
+[seg 21/09 14:14] O agente liga ao paciente. Atender? (s/n)          <- "n" typed in the terminal
+[seg 21/09 14:14] WhatsApp -> 3519…: Olá tiago, daqui fala a assistente da Clínica Exemplo. Tentámos ligar-lhe [...]
+[seg 21/09 14:14] WhatsApp <- 3519…: Estou a trabalhar, podem ligar depois das 18h
+[seg 21/09 14:19] WhatsApp -> 3519…: Combinado! Ligamos-lhe hoje às 18:00.
+[seg 21/09 18:00] Voz | Agente: [...] Tenho estas vagas para a sua consulta: 1) amanhã às 18:30 [...]
+[seg 21/09 18:05] Voz | Agente: Ficou marcada a sua consulta para amanhã às 18:30. Até lá!
+```
+
+There are two adapters with the same shape: `whatsapp_meta.py` (Meta's Cloud API, the default) and
+`whatsapp.py` (Twilio). What they take care of:
+
+- **Authenticity:** every webhook request must be signed by the provider. Meta signs the raw body
+  with HMAC-SHA256 and the App Secret; Twilio signs the URL and parameters with the auth token.
+  Unsigned or forged → 403. Meta also checks the URL once, with a verify token, before using it.
+- **Retries:** providers resend a message if they get no answer; each message id is acted on once.
+- **Latency:** the webhook answers immediately; the agent and its LLM call run outside the request,
+  so a slow model never causes a timeout and a duplicate delivery.
+- **Noise:** delivery and read receipts arrive on the same webhook and are skipped.
 - **WhatsApp's 24-hour rule:** free-form messages are only allowed within 24 hours of the patient's
   last WhatsApp message. Outside that window the adapter refuses to send and says a pre-approved
   template would be needed.
 
-Setup (about 15 minutes):
+**Why Meta and not Twilio by default.** I first tested with Twilio. Messages *from* the phone reached
+the agent, but every reply was refused: Twilio trial accounts may only send Twilio's own
+pre-approved templates, never free text (error 21654, "ContentSid Required"). The adapter logged the
+failure and the conversation carried on. Meta's test number, on a free developer account, can reply
+with free text inside the 24-hour window, which is all this demo needs. The Twilio adapter still
+works with an upgraded account (`--via twilio`).
 
-1. Create a free Twilio account. In the console, open *Messaging → Try it out → Send a WhatsApp
-   message*, and from your phone send the `join <code>` shown there to the sandbox number.
-2. Install [ngrok](https://ngrok.com/download), run `ngrok http 8000` and copy the
-   `https://….ngrok-free.app` address.
-3. In the sandbox settings, set *When a message comes in* to `https://….ngrok-free.app/whatsapp` (POST).
+Setup with Meta (about 30 minutes the first time):
+
+1. At [developers.facebook.com](https://developers.facebook.com/apps), create an app with the use
+   case *Connect with customers through WhatsApp*. Under *Use cases → Customize → Step 1. Try it
+   out*: generate an access token (it lasts about 24 hours), note the *Phone Number ID* and the
+   *WhatsApp Business account ID*, add your phone as a recipient (Meta sends it a code) and send the
+   sample message to check that it arrives.
+2. Copy the *App secret* from *App settings → Basic*.
+3. Expose port 8000 with a tunnel, e.g. `cloudflared tunnel --url http://localhost:8000` (or
+   `ngrok http 8000`), and copy the `https://…` address.
 4. In another terminal, from the project folder:
 
-```bash
-$env:TWILIO_ACCOUNT_SID = "AC..."
-$env:TWILIO_AUTH_TOKEN = "..."
-$env:TWILIO_WHATSAPP_FROM = "whatsapp:+14155238886"        # the sandbox number shown in the console
-$env:WHATSAPP_WEBHOOK_URL = "https://….ngrok-free.app/whatsapp"
-$env:DEEPSEEK_API_KEY = "sk-..."                           # optional: without --llm the rules are used
+```powershell
+$env:META_ACCESS_TOKEN = "EAA..."
+$env:META_PHONE_NUMBER_ID = "..."
+$env:META_APP_SECRET = "..."
+$env:META_VERIFY_TOKEN = "any-string-you-choose"
+$env:DEEPSEEK_API_KEY = "sk-..."          # optional: without --llm the rules are used
 python -m reach_agent.whatsapp_demo --llm deepseek
 ```
 
-5. From your phone, send "Olá, queria marcar uma consulta" (*Hi, I'd like to book an appointment*)
-   and answer the simulated call in the terminal.
+5. With the demo running, point the app's webhook at it: in the dashboard, set the callback URL
+   (`https://…/whatsapp`) and the verify token, and subscribe to the `messages` field. The same with
+   the API, plus the step that is easy to miss: the test WhatsApp account must be subscribed to
+   *your* app, or its messages never reach your webhook.
+
+```powershell
+curl.exe -X POST "https://graph.facebook.com/v26.0/<APP_ID>/subscriptions" `
+  --data-urlencode "object=whatsapp_business_account" --data-urlencode "fields=messages" `
+  --data-urlencode "callback_url=https://…/whatsapp" --data-urlencode "verify_token=any-string-you-choose" `
+  --data-urlencode "access_token=<APP_ID>|<APP_SECRET>"
+curl.exe -X POST -H "Authorization: Bearer $env:META_ACCESS_TOKEN" `
+  "https://graph.facebook.com/v26.0/<WHATSAPP_BUSINESS_ACCOUNT_ID>/subscribed_apps"
+```
+
+6. From your phone, send "Olá, queria marcar uma consulta" (*Hi, I'd like to book an appointment*)
+   to the test number, and answer the simulated call in the terminal.
+
+With Twilio instead (needs an upgraded account to send replies): set `TWILIO_ACCOUNT_SID`,
+`TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_FROM` (the sandbox number) and `WHATSAPP_WEBHOOK_URL` (the
+public `https://…/whatsapp` address, which Twilio signs), point the sandbox's *When a message comes
+in* at it, and run `python -m reach_agent.whatsapp_demo --via twilio`.
 
 Limits of the live demo: one patient at a time, state in memory, and the clock is still the
 simulated Monday (so "hoje às 18:00" is simulated time and scheduled messages go out immediately).
-The Twilio sandbox session expires 3 days after joining.
+A request with a bad signature gets a 403 but prints nothing in the terminal. A quick tunnel gets a
+new address every time it starts, so the webhook has to be pointed at it again.
 
 ## Limitations and next steps
 
@@ -285,7 +331,8 @@ reach_agent/
   messages.py         everything the agent says to the patient
   simulation.py       simulated clock, shared by the demo and the tests
   cli.py              terminal demo
-  whatsapp.py         WhatsApp transport: Twilio webhook (signature, retries), sender, 24 h window
+  whatsapp.py         WhatsApp transport through Twilio (signature, retries), sender, 24 h window
+  whatsapp_meta.py    WhatsApp transport through Meta's Cloud API (URL check, signature, retries), sender
   whatsapp_demo.py    live demo: patient on real WhatsApp, calls simulated in the terminal
 data/calendar.json    the week's slots
 evals/                dev and held-out sets + comparison script
