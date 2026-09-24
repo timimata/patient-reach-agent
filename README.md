@@ -13,7 +13,8 @@ with no real telephony, and most of the effort went into testing it properly.
   booked, with contact-hour guardrails and human handoff.
 - **Design:** the LLM only *reads* messages into validated JSON; every decision is plain, tested code.
 - **Headline result:** on 21 held-out messages, a regex baseline sent **40%** of the messages that
-  needed a human to one; the LLM (DeepSeek) sent **100%**, at ~0.9 s per message.
+  needed a human to one; the LLM (DeepSeek) sent **100%**, in each of 5 runs, at a p95 of ~1 s per
+  message.
 - **Also:** an optional adapter connects the same agent to real WhatsApp through Twilio's sandbox,
   without changing the agent.
 - **Run:** `pip install -r requirements.txt`, then `pytest` (offline, under a second) and
@@ -102,7 +103,7 @@ The flow follows the example Wilco shows on [getwilco.ai](https://getwilco.ai):
 | Scenarios | the agent's **decisions** in whole conversations, with a *scripted* extractor (each test states what each message means) | `tests/test_scenarios.py` |
 | Invariants | rules that must hold in *any* conversation, checked automatically after every scenario: no contact outside hours, nothing after closing, counters within limits. A mutation test disables the guardrail and confirms the check fails | `tests/helpers.py::check_invariants`, `tests/test_invariants.py` |
 | Eval | how well each extractor **reads** messages: 35 development + 21 held-out messages, labelled with the conversation state they arrive in | `evals/` |
-| End-to-end | with `--llm`, the same scenarios run with the real model reading the messages (the last full run with DeepSeek passed 112/112) | `pytest --llm deepseek` |
+| End-to-end | with `--llm`, the same scenarios run with the real model reading the messages (the last full run with DeepSeek passed 137/137) | `pytest --llm deepseek` |
 | WhatsApp adapter | Twilio signature check, retried messages handled once, the 24-hour window, routing each action to its channel, send failures. Offline, with locally signed requests and a fake sender | `tests/test_whatsapp.py` |
 
 The five required cases, in `tests/test_scenarios.py`:
@@ -138,8 +139,20 @@ There are two sets. The **dev** set (35 messages) was used to tune the prompt an
 | held-out: correct intent | 52% | 95% | 100% |
 | mean latency | 0 ms | ~0.9 s | ~1.4 s |
 
-Model `deepseek-flash`, with reasoning off and on. Each configuration ran once on each set. There
-were 0 unnecessary handoffs in every case.
+Model `deepseek-flash`, with reasoning off and on. There were 0 unnecessary handoffs in every case.
+
+**Stability.** The default configuration (`deepseek`) then ran 5 times on each set:
+
+| `deepseek`, 5 runs | dev | held-out |
+|---|---|---|
+| handoff recall | 100% in every run | 100% in every run |
+| invented times | 0 in every run | 0 in every run |
+| correct intent | 100% in every run | 95–100% |
+| latency per message | p50 0.78 s, p95 1.02 s | p50 0.78 s, p95 1.02 s |
+
+On dev every reading was identical across runs. On the held-out set only one message changed:
+"Pode ser um dia destes" (*maybe some day*) was read as `unclear` in 3 of 5 runs instead of
+`scheduling` with no time. Both lead to the same clarifying question.
 
 What this taught me:
 
@@ -240,9 +253,10 @@ The Twilio sandbox session expires 3 days after joining.
 - **The eval is small (56 messages) and I wrote all of it, held-out set included.** I wrote the
   held-out set after tuning the prompt, but the author is the same person. The next step would be
   real anonymised messages, or messages written by someone else.
-- **LLM variance:** each configuration ran once (the exception is the dev set with `deepseek`, which ran
-  twice before the prompt change with identical results). I would run it N times and report the spread.
-- I report mean latency; for voice the tail (p95) matters more.
+- **Variance was measured for the default configuration only** (5 runs per set); `deepseek-thinking`
+  ran once per set.
+- The p95 latency (1.02 s) covers the extraction alone. A voice turn would add speech-to-text and
+  text-to-speech on top.
 - The eval is per message; conversation-level metrics (booking rate, number of turns) are missing.
 - Time zones, public holidays and per-country contact rules (Wilco's site mentions *local rules* and
   the *patient's timezone*).
