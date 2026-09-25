@@ -104,7 +104,7 @@ The flow follows the example Wilco shows on [getwilco.ai](https://getwilco.ai):
 | Invariants | rules that must hold in *any* conversation, checked automatically after every scenario: no contact outside hours, nothing after closing, counters within limits. A mutation test disables the guardrail and confirms the check fails | `tests/helpers.py::check_invariants`, `tests/test_invariants.py` |
 | Eval | how well each extractor **reads** messages: 35 development + 21 held-out messages, labelled with the conversation state they arrive in | `evals/` |
 | End-to-end | with `--llm`, the same scenarios run with the real model reading the messages (the last full run with DeepSeek, on 24 September, passed 149/149) | `pytest --llm deepseek` |
-| WhatsApp adapters | Meta and Twilio signature checks, Meta's URL verification, retried messages handled once, receipts skipped, the 24-hour window, routing each action to its channel, send failures. Offline, with locally signed requests, a fake sender and a fake Graph API | `tests/test_whatsapp.py`, `test_whatsapp_meta.py` |
+| WhatsApp adapters and launcher | Meta and Twilio signature checks, the launcher's pre-flight checks and webhook retries, Meta's URL verification, retried messages handled once, receipts skipped, the 24-hour window, routing each action to its channel, send failures. Offline, with locally signed requests, a fake sender and a fake Graph API | `tests/test_whatsapp.py`, `test_whatsapp_meta.py`, `test_live.py` |
 
 The five required cases, in `tests/test_scenarios.py`:
 
@@ -246,43 +246,34 @@ failure and the conversation carried on. Meta's test number, on a free developer
 with free text inside the 24-hour window, which is all this demo needs. The Twilio adapter still
 works with an upgraded account (`--via twilio`).
 
-Setup with Meta (about 30 minutes the first time):
+Setup with Meta, once (about 30 minutes):
 
 1. At [developers.facebook.com](https://developers.facebook.com/apps), create an app with the use
    case *Connect with customers through WhatsApp*. Under *Use cases → Customize → Step 1. Try it
-   out*: generate an access token (it lasts about 24 hours), note the *Phone Number ID* and the
-   *WhatsApp Business account ID*, add your phone as a recipient (Meta sends it a code) and send the
-   sample message to check that it arrives.
-2. Copy the *App secret* from *App settings → Basic*.
-3. Expose port 8000 with a tunnel, e.g. `cloudflared tunnel --url http://localhost:8000` (or
-   `ngrok http 8000`), and copy the `https://…` address.
-4. In another terminal, from the project folder:
+   out*, note the *Phone Number ID* and the *WhatsApp Business account ID*, add your phone as a
+   recipient (Meta sends it a code) and send the sample message to check that it arrives.
+2. Get an access token. The one on that page lasts about 24 hours; for a demo you can start any
+   day, create a system user token instead (Business settings → *System users* → add one, give it
+   the app and the WhatsApp account, generate a token with `whatsapp_business_messaging` and
+   `whatsapp_business_management`).
+3. Copy `live.env.example` to `live.env` (ignored by Git) and fill it in, with the *App ID* and
+   *App secret* from *App settings → Basic*.
+4. Install [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)
+   (`winget install Cloudflare.cloudflared`). No account is needed.
+
+Then, every time, one command:
 
 ```powershell
-$env:META_ACCESS_TOKEN = "EAA..."
-$env:META_PHONE_NUMBER_ID = "..."
-$env:META_APP_SECRET = "..."
-$env:META_VERIFY_TOKEN = "any-string-you-choose"
-$env:DEEPSEEK_API_KEY = "sk-..."          # optional: without --llm the rules are used
-python -m reach_agent.whatsapp_demo --llm deepseek
+.\demo.ps1                 # Windows; elsewhere: python -m reach_agent.live --llm deepseek
 ```
 
-5. With the demo running, point the app's webhook at it: in the dashboard, set the callback URL
-   (`https://…/whatsapp`) and the verify token, and subscribe to the `messages` field. The same with
-   the API, plus the step that is easy to miss: the test WhatsApp account must be subscribed to
-   *your* app, or its messages never reach your webhook.
-
-```powershell
-curl.exe -X POST "https://graph.facebook.com/v26.0/<APP_ID>/subscriptions" `
-  --data-urlencode "object=whatsapp_business_account" --data-urlencode "fields=messages" `
-  --data-urlencode "callback_url=https://…/whatsapp" --data-urlencode "verify_token=any-string-you-choose" `
-  --data-urlencode "access_token=<APP_ID>|<APP_SECRET>"
-curl.exe -X POST -H "Authorization: Bearer $env:META_ACCESS_TOKEN" `
-  "https://graph.facebook.com/v26.0/<WHATSAPP_BUSINESS_ACCOUNT_ID>/subscribed_apps"
-```
-
-6. From your phone, send "Olá, queria marcar uma consulta" (*Hi, I'd like to book an appointment*)
-   to the test number, and answer the simulated call in the terminal.
+It checks the token (and how long it has left), the App secret, the phone number, the port and the
+LLM key, and stops with one clear line if something is wrong. Then it opens a cloudflared quick
+tunnel, points the app's webhook at the tunnel's new address, links the test WhatsApp account to
+the app if needed (easy to miss: without it the webhook is never called), and prints the number to
+message. Conversations then run back to back; `/sair` or Ctrl+C closes everything, tunnel included.
+From your phone, send "Olá, queria marcar uma consulta" (*Hi, I'd like to book an appointment*) and
+answer the simulated call in the terminal.
 
 With Twilio instead (needs an upgraded account to send replies): set `TWILIO_ACCOUNT_SID`,
 `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_FROM` (the sandbox number) and `WHATSAPP_WEBHOOK_URL` (the
@@ -291,8 +282,8 @@ in* at it, and run `python -m reach_agent.whatsapp_demo --via twilio`.
 
 Limits of the live demo: one patient at a time, state in memory, and the clock is still the
 simulated Monday (so "hoje às 18:00" is simulated time and scheduled messages go out immediately).
-A request with a bad signature gets a 403 but prints nothing in the terminal. A quick tunnel gets a
-new address every time it starts, so the webhook has to be pointed at it again.
+A request with a bad signature gets a 403 but prints nothing in the terminal (the launcher's
+checks catch a wrong App secret before that can happen).
 
 ## Limitations and next steps
 
@@ -334,6 +325,7 @@ reach_agent/
   whatsapp.py         WhatsApp transport through Twilio (signature, retries), sender, 24 h window
   whatsapp_meta.py    WhatsApp transport through Meta's Cloud API (URL check, signature, retries), sender
   whatsapp_demo.py    live demo: patient on real WhatsApp, calls simulated in the terminal
+  live.py             the live demo in one command: checks, tunnel, webhook (demo.ps1 on Windows)
 data/calendar.json    the week's slots
 evals/                dev and held-out sets + comparison script
 tests/                pytest
